@@ -1,0 +1,9 @@
+# Electricity 真实数据集实验
+defaults:
+  - ../default
+
+data:
+  dataset: electricity     # OpenML #151
+  context_size: 500
+
+experiment_name: electricity

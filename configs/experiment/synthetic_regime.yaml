@@ -1,0 +1,14 @@
+# 体制切换实验（突变漂移）
+defaults:
+  - ../default
+
+data:
+  dataset: regime_switching
+  n_samples: 10000
+  n_features: 10
+  n_regimes: 3             # 体制数量
+  regime_length: 2000      # 每个体制持续的样本数（最后一个可能更短）
+  noise: 0.1
+  random_seed: 42
+
+experiment_name: synthetic_regime

@@ -1,0 +1,13 @@
+# 旋转决策边界实验（渐进关系漂移）
+defaults:
+  - ../default
+
+data:
+  dataset: rotating_boundary
+  n_samples: 10000
+  n_features: 2            # 旋转边界用 2D 方便可视化
+  drift_speed: 0.003       # 每步旋转角度（弧度）
+  noise: 0.1
+  random_seed: 42
+
+experiment_name: synthetic_rotate

@@ -1,0 +1,17 @@
+# 默认配置
+
+data:
+  context_size: 500       # TabPFN 上下文窗口大小（训练集样本数）
+  step_size: 1            # 每步滑动步长
+  n_samples: 10000        # 合成数据总样本数
+  n_features: 10          # 特征维度
+  random_seed: 42
+
+model:
+  device: cpu             # cpu / cuda
+
+evaluation:
+  window_size: 200        # 用于计算窗口指标的窗口大小
+  warmup_steps: 500       # 前 warmup_steps 步不计入评估（等待上下文积累）
+
+results_dir: results/

@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Results and outputs (large files, keep PNGs)
+results/*.npz
+results/*.npy
+*.pt
+*.pkl
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Test cache
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
