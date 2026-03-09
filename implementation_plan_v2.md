@@ -1,4 +1,4 @@
-# 多时间尺度时序学习系统 — 实现计划 V2（稳妥路线）
+# 多时间尺度时序学习系统 — 实现计划 V2
 
 ## Context
 
@@ -212,7 +212,7 @@ for t in range(len(data)):
 
 **注意：** Phase 2 阶段的融合是**概率空间的简单加法**（而非 logit），因为只有两层且 correction 量级很小（接近 0 附近的残差），数值饱和风险可控。到 Phase 3 引入门控后替换。
 
-**里程碑：** 在合成数据上，Level 1+3 的 prequential accuracy 显著优于 Level 1 单独。**到这一步，中期答辩内容已足够。**
+**里程碑：** 在合成数据上，Level 1+3 的 prequential accuracy 显著优于 Level 1 单独。
 
 **关键文件：**
 - `src/memory/buffer.py`
