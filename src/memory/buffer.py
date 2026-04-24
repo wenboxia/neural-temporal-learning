@@ -115,6 +115,19 @@ class WorkingMemoryBuffer:
         errors = np.array(self._errors)
         return errors[-window:] if len(errors) >= window else errors
 
+    def recent_features(self, window: int) -> np.ndarray:
+        """
+        返回最近 window 个时步的特征矩阵（若不足则返回全部）。
+
+        Args:
+            window: 取最近多少步的特征
+
+        Returns:
+            (min(window, len), n_features) float32 数组
+        """
+        features = np.array(list(self._features), dtype=np.float32)
+        return features[-window:] if len(features) >= window else features
+
     def mean_recent_error(self, window: int = 50) -> float:
         """最近 window 步的平均误差。"""
         recent = self.recent_errors(window)
