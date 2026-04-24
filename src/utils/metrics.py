@@ -10,6 +10,7 @@
 from typing import Dict, List, Optional
 
 import numpy as np
+from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 
 
 def prequential_accuracy(
@@ -154,8 +155,17 @@ def summarize_results(
     speeds = adaptation_speed(predictions, labels, drift_points, baseline_acc=baseline * 0.95, offset=offset)
     valid_speeds = [v for v in speeds.values() if v is not None]
 
+    # Balanced accuracy 和 AUC-ROC
+    bal_acc = float(balanced_accuracy_score(labels, predictions))
+    try:
+        auc = float(roc_auc_score(labels, predictions))
+    except ValueError:
+        auc = None  # 只有一个类别时 AUC 无定义
+
     return {
         "overall_acc": overall,
+        "balanced_acc": bal_acc,
+        "auc_roc": auc,
         "pre_drift_acc": float(np.mean(pre_drift_accs)) if pre_drift_accs else None,
         "post_drift_acc": float(np.mean(post_drift_accs)) if post_drift_accs else None,
         "window_accs": win_accs,
