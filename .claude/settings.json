@@ -24,15 +24,15 @@
       "Bash(mkdir *)",
       "Bash(cp *)",
       "Bash(mv *)",
-      "Edit(/Users/wenbo/Desktop/neural_1/**)",
-      "Write(/Users/wenbo/Desktop/neural_1/**)",
-      "Read(/Users/wenbo/Desktop/neural_1/**)"
+      "Edit(//Users/wenbo/Desktop/neural_1/**)",
+      "Write(//Users/wenbo/Desktop/neural_1/**)",
+      "Read(//Users/wenbo/Desktop/neural_1/**)"
     ],
     "deny": [
-      "Edit(/Users/wenbo/.claude/**)",
-      "Write(/Users/wenbo/.claude/**)",
-      "Edit(/Users/wenbo/.agents/**)",
-      "Write(/Users/wenbo/.agents/**)",
+      "Edit(//Users/wenbo/.claude/**)",
+      "Write(//Users/wenbo/.claude/**)",
+      "Edit(//Users/wenbo/.agents/**)",
+      "Write(//Users/wenbo/.agents/**)",
       "Bash(sudo *)",
       "Bash(rm -rf /*)",
       "Bash(rm -rf ~/*)",

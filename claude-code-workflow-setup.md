@@ -58,15 +58,15 @@
       "Bash(mkdir *)",
       "Bash(cp *)",
       "Bash(mv *)",
-      "Edit(/Users/wenbo/Desktop/neural_1/**)",
-      "Write(/Users/wenbo/Desktop/neural_1/**)",
-      "Read(/Users/wenbo/Desktop/neural_1/**)"
+      "Edit(//Users/wenbo/Desktop/neural_1/**)",
+      "Write(//Users/wenbo/Desktop/neural_1/**)",
+      "Read(//Users/wenbo/Desktop/neural_1/**)"
     ],
     "deny": [
-      "Edit(/Users/wenbo/.claude/**)",
-      "Write(/Users/wenbo/.claude/**)",
-      "Edit(/Users/wenbo/.agents/**)",
-      "Write(/Users/wenbo/.agents/**)",
+      "Edit(//Users/wenbo/.claude/**)",
+      "Write(//Users/wenbo/.claude/**)",
+      "Edit(//Users/wenbo/.agents/**)",
+      "Write(//Users/wenbo/.agents/**)",
       "Bash(sudo *)",
       "Bash(rm -rf /*)",
       "Bash(rm -rf ~/*)",
@@ -311,6 +311,8 @@ CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude
 3. **skill 字段名依赖版本**：Step 3 真正执行时让窗口里的 Claude 用 `update-config` skill 或查文档确认。
 
 4. **git 兜底**：每完成一个完整任务让 Claude commit 一次。`git reflog` 可恢复意外改动。
+
+5. **路径 glob 必须用 `//` 前缀**：路径类 allow/deny（`Edit(...)` / `Write(...)` / `Read(...)`）必须用 `//` 前缀（Claude Code 内部路径规范化），单 `/` 无效；该格式可能因 Claude Code 版本变更，升级后需复验。
 
 ---
 
