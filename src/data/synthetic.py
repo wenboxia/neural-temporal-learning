@@ -1,3 +1,5 @@
+# TODO: drift类型突变还是平缓; drift应用的对象是针对特征还是规律
+
 """
 合成时序漂移数据集生成器
 
@@ -115,7 +117,8 @@ def make_regime_switching(
         x = rng.standard_normal(n_features) + means[regime]
         X[t] = x.astype(np.float32)
 
-        label = int(np.dot(x, weights[regime]) >= 0)
+        # 居中决策边界：相对于体制均值判定，保证体制内类别平衡
+        label = int(np.dot(x - means[regime], weights[regime]) >= 0)
         if rng.random() < noise:
             label = 1 - label
         y[t] = label
@@ -169,7 +172,8 @@ def make_combined_drift(
         x = rng.standard_normal(n_features) + mean_offset
         X[t] = x.astype(np.float32)
 
-        label = int(np.dot(x, weights_list[boundary_idx]) >= 0)
+        # 居中决策边界：相对于当前均值偏移判定，保证类别平衡
+        label = int(np.dot(x - mean_offset, weights_list[boundary_idx]) >= 0)
         if rng.random() < noise:
             label = 1 - label
         y[t] = label
