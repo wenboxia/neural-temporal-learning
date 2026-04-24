@@ -28,7 +28,7 @@ matplotlib.use("Agg")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data.synthetic import make_dataset
-from src.data.temporal_loader import TemporalWindowLoader
+from src.data.temporal_loader import CompositeWindowLoader, TemporalWindowLoader
 from src.models.slow_prior import SlowPrior
 from src.utils.metrics import summarize_results, window_accuracy
 
@@ -51,6 +51,8 @@ def parse_args():
     parser.add_argument("--window_size", type=int, default=100, help="评估窗口大小")
     parser.add_argument("--n_estimators", type=int, default=4, help="TabPFN 集成数（越小越快，CPU 建议 4）")
     parser.add_argument("--max_eval_steps", type=int, default=None, help="最多评估多少步（调试用，None = 全量）")
+    parser.add_argument("--fixed_ratio", type=float, default=0.0,
+                        help="固定池占 context 比例（0=纯滑动窗口，0.67=200固定+100滑动）")
     parser.add_argument("--results_dir", type=str, default="results", help="输出目录")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
@@ -61,7 +63,7 @@ def run_tabpfn_baseline(args):
 
     print(f"\n{'='*60}")
     print(f"数据集: {args.dataset}")
-    print(f"样本数: {args.n_samples} | 上下文大小: {args.context_size}")
+    print(f"样本数: {args.n_samples} | 上下文大小: {args.context_size} | fixed_ratio: {args.fixed_ratio}")
     print(f"TabPFN n_estimators: {args.n_estimators}")
     print(f"{'='*60}\n")
 
@@ -81,12 +83,25 @@ def run_tabpfn_baseline(args):
     print(f"  漂移点 ({len(dataset.drift_points)} 个): {dataset.drift_points[:10]}")
 
     # 2. 初始化加载器和模型
-    loader = TemporalWindowLoader(
-        dataset.X,
-        dataset.y,
-        context_size=args.context_size,
-        step_size=1,
-    )
+    if args.fixed_ratio > 0:
+        loader = CompositeWindowLoader(
+            dataset.X,
+            dataset.y,
+            context_size=args.context_size,
+            fixed_ratio=args.fixed_ratio,
+            step_size=1,
+            random_seed=args.seed,
+        )
+        fixed_size = int(args.context_size * args.fixed_ratio)
+        sliding_size = args.context_size - fixed_size
+        print(f"  组合窗口: 固定池 {fixed_size} + 滑动窗口 {sliding_size}")
+    else:
+        loader = TemporalWindowLoader(
+            dataset.X,
+            dataset.y,
+            context_size=args.context_size,
+            step_size=1,
+        )
     model = SlowPrior(device="cpu", n_estimators=args.n_estimators)
 
     # 3. Prequential 评估循环
@@ -162,9 +177,10 @@ def run_tabpfn_baseline(args):
     axes[0].plot(t_axis, win_accs, color="steelblue", linewidth=1.2, label="TabPFN (baseline)")
     axes[0].set_ylabel("Window Accuracy", fontsize=12)
     axes[0].set_ylim(0, 1.05)
+    ratio_info = f", fixed_ratio={args.fixed_ratio}" if args.fixed_ratio > 0 else ""
     axes[0].set_title(
         f"TabPFN Baseline on '{args.dataset}' — Drift Detection\n"
-        f"(context_size={args.context_size}, window_size={args.window_size})",
+        f"(context_size={args.context_size}, window_size={args.window_size}{ratio_info})",
         fontsize=13,
     )
     axes[0].legend(fontsize=10)
@@ -196,21 +212,22 @@ def run_tabpfn_baseline(args):
         axes[1].axvline(dp, color="red", linestyle="--", alpha=0.5, linewidth=1)
 
     plt.tight_layout()
-    out_path = os.path.join(args.results_dir, f"baseline_{args.dataset}.png")
+    ratio_suffix = f"_fr{args.fixed_ratio:.2f}" if args.fixed_ratio > 0 else ""
+    out_path = os.path.join(args.results_dir, f"baseline_{args.dataset}{ratio_suffix}.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"图表已保存至: {out_path}")
 
     # 6. 保存数值结果
     np.savez(
-        os.path.join(args.results_dir, f"baseline_{args.dataset}.npz"),
+        os.path.join(args.results_dir, f"baseline_{args.dataset}{ratio_suffix}.npz"),
         predictions=all_preds,
         labels=all_labels,
         drift_points=np.array(dataset.drift_points),
         window_accs=win_accs,
         overall_acc=np.array([results["overall_acc"]]),
     )
-    print(f"数值结果已保存至: results/baseline_{args.dataset}.npz")
+    print(f"数值结果已保存至: results/baseline_{args.dataset}{ratio_suffix}.npz")
 
     return results
 

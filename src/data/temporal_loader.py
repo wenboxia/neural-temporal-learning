@@ -104,3 +104,91 @@ class TemporalWindowLoader:
             y_query=self.y[t: t + 1],
             t=t,
         )
+
+
+class CompositeWindowLoader:
+    """
+    组合窗口加载器：固定代表集 + 滑动近期窗。
+
+    将 context_size 拆分为两部分：
+      - fixed_pool (fixed_size 个样本)：从最早的 pool_source_size 个样本中
+        随机采样，在整个流中保持不变。提供"长期记忆"。
+      - sliding_window (context_size - fixed_size 个样本)：紧邻查询点的最近样本。
+        提供"短期记忆"，快速适应漂移。
+
+    当 fixed_ratio=0.0 时退化为纯滑动窗口（等价于 TemporalWindowLoader）。
+    """
+
+    def __init__(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        context_size: int = 300,
+        fixed_ratio: float = 0.67,
+        pool_source_size: Optional[int] = None,
+        step_size: int = 1,
+        random_seed: int = 42,
+    ):
+        """
+        Args:
+            X: 特征矩阵 (n_samples, n_features)
+            y: 标签向量 (n_samples,)
+            context_size: 总上下文大小（fixed + sliding）
+            fixed_ratio: 固定池占 context_size 的比例，范围 [0, 1)
+            pool_source_size: 从前多少个样本中采样固定池（默认 = context_size）
+            step_size: 滑动步长
+            random_seed: 固定池采样的随机种子
+        """
+        assert len(X) == len(y)
+        assert 0.0 <= fixed_ratio < 1.0, "fixed_ratio 必须在 [0, 1) 范围内"
+
+        self.X = X
+        self.y = y
+        self.context_size = context_size
+        self.fixed_ratio = fixed_ratio
+        self.step_size = step_size
+
+        self.fixed_size = int(context_size * fixed_ratio)
+        self.sliding_size = context_size - self.fixed_size
+
+        # 固定池：从最早的 pool_source_size 个样本中采样
+        if self.fixed_size > 0:
+            source_size = pool_source_size if pool_source_size else context_size
+            source_size = min(source_size, len(X))
+            assert self.fixed_size <= source_size, (
+                f"fixed_size ({self.fixed_size}) > pool_source_size ({source_size})"
+            )
+            rng = np.random.default_rng(random_seed)
+            indices = rng.choice(source_size, size=self.fixed_size, replace=False)
+            indices.sort()  # 保持时间顺序
+            self.fixed_X = X[indices].copy()
+            self.fixed_y = y[indices].copy()
+        else:
+            self.fixed_X = np.empty((0, X.shape[1]), dtype=X.dtype)
+            self.fixed_y = np.empty((0,), dtype=y.dtype)
+
+        # 滑动窗口的起始位置：需要至少 sliding_size 个历史样本
+        self.start = max(context_size, self.sliding_size)
+        self.end = len(X)
+
+    def __len__(self) -> int:
+        return max(0, (self.end - self.start + self.step_size - 1) // self.step_size)
+
+    def __iter__(self) -> Generator[TemporalBatch, None, None]:
+        for t in range(self.start, self.end, self.step_size):
+            # 滑动部分：紧邻查询点的最近样本
+            slide_start = t - self.sliding_size
+            X_slide = self.X[slide_start: t]
+            y_slide = self.y[slide_start: t]
+
+            # 拼接：固定池 + 滑动窗口
+            X_ctx = np.concatenate([self.fixed_X, X_slide], axis=0)
+            y_ctx = np.concatenate([self.fixed_y, y_slide], axis=0)
+
+            yield TemporalBatch(
+                X_ctx=X_ctx,
+                y_ctx=y_ctx,
+                X_query=self.X[t: t + 1],
+                y_query=self.y[t: t + 1],
+                t=t,
+            )
