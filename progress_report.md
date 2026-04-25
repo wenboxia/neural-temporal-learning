@@ -16,7 +16,10 @@
 | FIFO 工作记忆缓冲区 | `src/memory/buffer.py` | KNN / EMA 查询支持 |
 | Level 3 快速校正器 | `src/models/fast_corrector.py` | 零参数残差补偿 |
 | 评估指标 | `src/utils/metrics.py` | 窗口准确率、适应速度、balanced accuracy、AUC-ROC |
-| 单元测试 | `tests/` (3 个文件，60+ 条测试) | 全部通过 |
+| Level 2 软门控融合 | `src/models/gated_ensemble.py` | gate（softmax 三路权重）+ adapter（无界残差） |
+| 快→中巩固 | `src/consolidation/fast_to_inter.py` | buffer→adapter MSE 蒸馏 |
+| 三层编排器 | `src/models/multi_timescale.py` | step() 每步 slow→fast→gated fusion + 在线训练 |
+| 单元测试 | `tests/` (5 个文件，70+ 条测试) | 全部通过 |
 
 ---
 
@@ -169,10 +172,63 @@ FastCorrector（Level 3 only）在三种漂移类型上均未显著超越 baseli
 
 ---
 
-## 下一步：Phase 3（软门控融合 + 快→中巩固）
+## Phase 3：软门控融合 + 快→中巩固
 
-待实现：
-- `src/models/gated_ensemble.py`：软门控融合网络（gate + adapter）
-- `src/consolidation/fast_to_inter.py`：快→中巩固逻辑
-- `src/models/multi_timescale.py`：三层编排器
-- `scripts/run_phase3.py`：Phase 3 评估脚本
+**架构**：在 Phase 2（slow + fast）基础上引入 Level 2 软门控融合层。每步 prequential 流程：
+
+```
+slow_prior(X_ctx, y_ctx, x_t) → y_slow
+fast_corrector.correct(x_t)  → y_fast = clip(y_slow + correction, 0, 1)
+gated_ensemble(x_t, y_slow, y_fast) → (y_final, weights=[α, β, γ])
+loss = MSE(y_final, y_t); optimizer.step()         # 在线训练 gate + adapter
+fast_corrector.update(x_t, error)
+if fast_corrector.should_consolidate(): consolidator.consolidate(...)
+```
+
+**实验参数**：`buffer_size=100, fast_method=knn, gate_hidden_dim=64, lr=1e-3, consolidation_threshold=0.05, consolidation_window=50, consolidation_epochs=10`
+
+### 跨数据集对比
+
+| 数据集 | Phase 1 baseline | Phase 2 best | **Phase 3 (Ours-Full)** | Δ vs Phase 2 |
+|--------|:---------------:|:------------:|:----------------------:|:------------:|
+| `regime_switching` (3000 步) | 82.96% | 82.50% (EMA) | **77.93%** | **−4.57 pp** |
+| `rotating_boundary` (3000 步) | 83.18% | 83.21% (EMA) | **84.39%** | **+1.18 pp** |
+| `combined_drift` (5000 步) | 82.06% | 82.13% (KNN) | **81.94%** | **−0.19 pp** |
+
+> Phase 1/2 列引自本报告 Phase 1、Phase 2、Phase 2.5 节（同 prequential 协议）。
+
+### 门控权重轨迹观察
+
+三个数据集的门控权重均值（α=slow、β=inter、γ=fast）呈现完全不同的偏好模式：
+
+| 数据集 | ᾱ (slow) | β̄ (inter) | γ̄ (fast) | 模式解读 |
+|--------|:-------:|:--------:|:-------:|----------|
+| `regime_switching` | 0.83 | 0.02 | 0.15 | slow 主导，fast 辅助；adapter 几乎不用 |
+| `rotating_boundary` | 0.35 | 0.06 | **0.59** | **fast 主导**；缓慢漂移下 KNN 局部查找信号最强 |
+| `combined_drift` | **0.98** | 0.01 | 0.02 | 极端 slow 主导；TabPFN 上下文学习已足够 |
+
+各数据集中 α/γ 的瞬时值在 [0, 1] 全程波动（min/max 接近 0 和 1），说明 gate 确实在"动态分配"而非塌缩到固定权重。这定性符合 plan V2 的预期：稳定期信任 slow，漂移期切换偏好。
+
+### 巩固事件
+
+**所有三个数据集的 `consolidation_events` 均为 0** —— 在最长的 `combined_drift`（5000 步、4800 评估步）中亦未触发。原因：`should_consolidate(window=50, bias_threshold=0.05)` 要求最近 50 步 buffer 的 |mean(errors)| > 0.05 且 std < |mean|，而 prequential 滚动下 fast_corrector 的误差分布大多围绕 0 抖动，难以同时满足"系统性偏移"与"低方差"。Phase 3D 的 in-script 训练替代了模板设想的"长期偏移触发巩固蒸馏"路径 —— 当 gate + adapter 已在每步训练，buffer 偏置很难积累到阈值。这条路径需要在 Phase 4 重新评估（要么调阈值/window，要么把 consolidation 改成基于"窗口准确率下滑"等其它信号）。
+
+### 跨数据集结论
+
+1. **Phase 3 不是统一的胜利**：三数据集中仅 `rotating_boundary` 录得 +1.18 pp，`regime_switching` 显著回退 4.57 pp，`combined_drift` 几乎持平。门控融合并未自动解决 Phase 2 暴露的"突变漂移后 buffer 污染"问题 —— 漂移后的 50 步窗口里，gate 会被错误的 fast 信号短暂误导（regime_switching 的 5 个漂移点 post-50 准确率分别为 0.64 / 0.60 / 0.60 / 0.60 / 0.50，比 Phase 1 baseline 的 ~0.65 平均水平更差）。
+2. **gate 权重模式合理但被过拟合训练抢戏**：每步 MSE 训练让 gate 收敛到对当前 batch 局部最优，对漂移期的快速切换响应不够 —— 这是 plan V2 模板未覆盖、由 Phase 3C 决策 1 引入的副作用。后续可以考虑 freeze gate 一段时间或加 entropy 正则。
+3. **巩固模块未发挥作用**：当前阈值下从未触发，等价于跑了一个"纯 gate fusion"系统。需要在 Phase 4 重新设计触发条件 / 阈值。
+
+### 结果图
+
+![Phase 3 regime_switching](results/phase3_regime_switching.png)
+![Phase 3 rotating_boundary](results/phase3_rotating_boundary.png)
+![Phase 3 combined_drift](results/phase3_combined_drift.png)
+
+> 每张图：上半 — 滑动窗口准确率（红色虚线 = 漂移点；本次 0 个绿色巩固竖线）；下半 — gate 权重 α/β/γ 随时间轨迹（y∈[0,1]）。
+
+---
+
+## 下一步
+
+- **Phase 4**（待启动）：基于 Phase 3D 的负面发现，先调 gate 训练策略（节流 / entropy 正则）和 consolidation 触发条件，再做真实数据集验证（需 GPU）。
