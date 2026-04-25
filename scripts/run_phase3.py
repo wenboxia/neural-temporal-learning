@@ -83,6 +83,8 @@ def parse_args():
                         help="巩固观察窗口大小（也用于 FastToInterConsolidation）")
     parser.add_argument("--consolidation_epochs", type=int, default=10,
                         help="每次巩固执行的梯度更新步数")
+    parser.add_argument("--consolidation_cooldown", type=int, default=100,
+                        help="两次巩固之间的最小间隔步数（防 thrashing）")
     parser.add_argument("--gate_hidden_dim", type=int, default=64,
                         help="GatedEnsemble gate/adapter 隐藏层宽度")
     parser.add_argument("--lr", type=float, default=1e-3,
@@ -108,7 +110,8 @@ def main():
     print(f"gate_hidden_dim: {args.gate_hidden_dim} | lr: {args.lr}")
     print(f"consolidation_threshold: {args.consolidation_threshold} | "
           f"consolidation_window: {args.consolidation_window} | "
-          f"consolidation_epochs: {args.consolidation_epochs}")
+          f"consolidation_epochs: {args.consolidation_epochs} | "
+          f"consolidation_cooldown: {args.consolidation_cooldown}")
     print(f"{'='*60}\n")
 
     # ── 生成数据 ──────────────────────────────────────────────────────────
@@ -144,6 +147,7 @@ def main():
         consolidation_threshold=args.consolidation_threshold,
         consolidation_window=args.consolidation_window,
         consolidation_epochs=args.consolidation_epochs,
+        consolidation_cooldown=args.consolidation_cooldown,
         gate_hidden_dim=args.gate_hidden_dim,
         lr=args.lr,
         device="cpu",

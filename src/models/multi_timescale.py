@@ -5,9 +5,17 @@ Phase 3C：三时间尺度编排器（MultiTimescaleModel）
 FastToInterConsolidation 四个子模块串联成单一 prequential 接口，
 每步调用 step() 完成：慢层预测 → 快层校正 → 门控融合 → 在线训练 → buffer 更新 → 按需巩固。
 
+Phase 3 v2: residual-additive fusion (option A)
+融合数学：y_final_raw = y_slow + β·y_inter + γ·correction
+  correction 全功率参与，仅由 γ 控制；α 不参与 fusion 但 gate 输出维度保留为 3。
+
 偏离 plan V2 的两处设计决策（在 MultiTimescaleModel 类 docstring 中说明）：
   [决策 1] 每步以 MSE 训练 gate + adapter
   [决策 2] y_final clamp 到 [0, 1] 后再作为预测输出
+
+F: gate / adapter 分离 optimizer + consolidation cooldown，
+解决 B 暴露的 adapter thrashing 问题（每步 backward 反复改写 adapter，
+consolidation 学到的中期偏置被冲掉；同时巩固在稳定期反复触发）。
 
 使用流程（prequential online 场景）：
 
@@ -56,6 +64,10 @@ class MultiTimescaleModel:
             clamp 发生在 MSE 计算之后（loss 使用原始 y_final_raw），
             返回值使用 torch.clamp(y_final_raw, 0, 1).item()，
             确保外部调用方拿到合法概率。
+
+    Phase 3 v2 融合数学（residual-additive fusion, option A）：
+        y_final_raw = y_slow + β·y_inter + γ·correction
+        correction 全功率参与，仅由 γ 控制；α 不参与 fusion。
     """
 
     def __init__(
@@ -68,6 +80,7 @@ class MultiTimescaleModel:
         consolidation_threshold: float = 0.05,
         consolidation_window: int = 50,
         consolidation_epochs: int = 10,
+        consolidation_cooldown: int = 100,
         gate_hidden_dim: int = 64,
         lr: float = 1e-3,
         device: str = "cpu",
@@ -83,8 +96,9 @@ class MultiTimescaleModel:
             consolidation_threshold: 触发巩固的最小平均误差绝对值
             consolidation_window:    巩固观察窗口（同时是 FastToInterConsolidation.window）
             consolidation_epochs:    每次巩固的梯度更新步数
+            consolidation_cooldown:  两次巩固之间的最小间隔步数（防 thrashing）
             gate_hidden_dim:         GatedEnsemble gate/adapter 隐藏层宽度
-            lr:                      Adam 学习率（应用于 GatedEnsemble 全部参数）
+            lr:                      Adam 学习率（gate optimizer 与 adapter optimizer 共用）
             device:                  "cpu"（TabPFN 约束，不支持其他设备）
             n_estimators:            TabPFN 集成数量
         """
@@ -94,7 +108,9 @@ class MultiTimescaleModel:
         self.input_dim = input_dim
         self.consolidation_window = consolidation_window
         self.consolidation_threshold = consolidation_threshold
+        self.consolidation_cooldown = consolidation_cooldown
         self._step_count: int = 0
+        self._last_consolidation_t: float = -float('inf')
         self.consolidation_events: list = []
 
         # ── 子模块初始化 ──────────────────────────────────────────────
@@ -120,8 +136,11 @@ class MultiTimescaleModel:
         )
 
         # ── 优化器：仅优化 GatedEnsemble（TabPFN 权重绝不微调）─────────
-        self.optimizer = torch.optim.Adam(
-            self.gated_ensemble.parameters(), lr=lr
+        self.gate_optimizer = torch.optim.Adam(
+            self.gated_ensemble.gate.parameters(), lr=lr
+        )
+        self.adapter_optimizer = torch.optim.Adam(
+            self.gated_ensemble.adapter.parameters(), lr=lr
         )
 
     # ------------------------------------------------------------------
@@ -150,6 +169,9 @@ class MultiTimescaleModel:
             y_pred:  float ∈ [0, 1]，clamp 后的正类概率（可直接用于 ≥0.5 判断）
             weights: np.ndarray shape (3,)，门控权重 [α_slow, β_inter, γ_fast]
 
+        v2 融合数学：y_final_raw = y_slow + β·y_inter + γ·correction
+        correction 全功率参与，仅由 γ 控制；clamp 在返回前统一做。
+
         consolidation_events 存的是全局时间步坐标，由调用方通过 t 参数提供；
         consolidation 触发由 fast_corrector.should_consolidate 单点判断；
         consolidate() 内部有 assert 兜底形状，外层不加额外保护（YAGNI）。
@@ -174,34 +196,36 @@ class MultiTimescaleModel:
 
         # ── Step 2：快层校正 ─────────────────────────────────────────
         correction: float = self.fast_corrector.correct(x_t)
-        y_fast_prob: float = float(np.clip(y_slow + correction, 0.0, 1.0))
 
-        # ── Step 3：门控融合 ─────────────────────────────────────────
-        x_tensor = torch.tensor(x_t[np.newaxis, :], dtype=torch.float32)   # (1, D)
-        y_slow_t  = torch.tensor([[y_slow]],      dtype=torch.float32)     # (1, 1)
-        y_fast_t  = torch.tensor([[y_fast_prob]], dtype=torch.float32)     # (1, 1)
+        # ── Step 3：门控融合（v2 residual-additive）─────────────────
+        # correction 直接作为残差传入，不预先 clip；clamp 在返回前统一做
+        x_tensor          = torch.tensor(x_t[np.newaxis, :], dtype=torch.float32)  # (1, D)
+        y_slow_tensor     = torch.tensor([[y_slow]],          dtype=torch.float32)  # (1, 1)
+        correction_tensor = torch.tensor([[correction]],      dtype=torch.float32)  # (1, 1)
 
         self.gated_ensemble.train()
         y_final_raw, weights_tensor = self.gated_ensemble(
-            x_tensor, y_slow_t, y_fast_t
+            x_tensor, y_slow_tensor, correction_tensor
         )                                                  # (1,1), (1,3)
 
         # ── Step 4：每步 MSE 训练（偏离 plan V2 决策 1）────────────────
         y_t_tensor = torch.tensor([[y_t]], dtype=torch.float32)            # (1, 1)
         loss = nn.functional.mse_loss(y_final_raw, y_t_tensor)
-        self.optimizer.zero_grad()
+        self.gate_optimizer.zero_grad()
+        self.adapter_optimizer.zero_grad()   # 必须 zero 防 adapter grad 跨步累积
         loss.backward()
-        self.optimizer.step()
+        self.gate_optimizer.step()           # 仅 step gate；adapter 不动
 
         # ── Step 5：观测后更新 buffer ────────────────────────────────
         error: float = y_t - y_slow
         self.fast_corrector.update(x_t, error)
 
         # ── Step 6：按需巩固 ─────────────────────────────────────────
-        if self.fast_corrector.should_consolidate(
-            window=self.consolidation_window,
-            bias_threshold=self.consolidation_threshold,
-        ):
+        if (t - self._last_consolidation_t >= self.consolidation_cooldown
+                and self.fast_corrector.should_consolidate(
+                    window=self.consolidation_window,
+                    bias_threshold=self.consolidation_threshold,
+                )):
             X_recent = self.fast_corrector.buffer.recent_features(
                 self.consolidation_window
             )
@@ -209,8 +233,9 @@ class MultiTimescaleModel:
                 gated_ensemble=self.gated_ensemble,
                 fast_corrector=self.fast_corrector,
                 X_recent=X_recent,
-                optimizer=self.optimizer,
+                optimizer=self.adapter_optimizer,
             )
+            self._last_consolidation_t = t
             self.consolidation_events.append(t)
 
         self._step_count += 1  # 保留用于 __repr__ 调试展示，不再用于事件记录

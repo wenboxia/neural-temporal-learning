@@ -189,6 +189,20 @@ class TestFastCorrector:
         # 在随机数据上不要求高准确率，只验证循环能跑通
         assert 0.0 <= acc <= 1.0
 
+    def test_should_consolidate_true_under_noise(self):
+        """
+        压入 60 条交替 0.0 / 0.4 的 errors（mean=0.2, std≈0.2）：
+        旧规则 std < |mean| 会返回 False；新规则只看 |mean|>threshold，应返回 True。
+        这是本次修改的核心断言。
+        """
+        fc = FastCorrector(buffer_size=200, method="knn")
+        rng = np.random.default_rng(0)
+        for i in range(60):
+            x = rng.standard_normal(8).astype(np.float32)
+            err = 0.0 if i % 2 == 0 else 0.4
+            fc.update(x, err)
+        assert fc.should_consolidate(window=50, bias_threshold=0.05) == True
+
     def test_repr(self):
         fc = FastCorrector(buffer_size=50, method="knn")
         s = repr(fc)

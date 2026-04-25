@@ -107,8 +107,10 @@ class FastCorrector:
         """
         判断是否需要触发快→中巩固。
 
-        条件：缓冲区中最近 window 步的误差均值绝对值 > bias_threshold
-        且标准差 < 均值绝对值（说明误差方向一致，不是随机噪声）。
+        条件：缓冲区中最近 window 步的误差均值绝对值 > bias_threshold。
+
+        B: 删除 std < |mean| 条件 —— 该规则对二分类 buffer errors 结构性过严，
+        4 组消融全部 0 触发即证。改为只看 |mean| 绝对值。
 
         Args:
             window:          观察窗口
@@ -123,7 +125,7 @@ class FastCorrector:
         mean_err = self.buffer.mean_recent_error(window)
         std_err = self.buffer.std_recent_error(window)
 
-        return abs(mean_err) > bias_threshold and std_err < abs(mean_err)
+        return abs(mean_err) > bias_threshold
 
     def __repr__(self) -> str:
         return (

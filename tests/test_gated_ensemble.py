@@ -27,9 +27,9 @@ class TestGatedEnsembleBehavior:
 
         x      = torch.randn(B, input_dim)
         y_slow = torch.rand(B, n_outputs)
-        y_fast = torch.rand(B, n_outputs)
+        correction = torch.rand(B, n_outputs)
 
-        y_final, weights = model(x, y_slow, y_fast)
+        y_final, weights = model(x, y_slow, correction)
 
         assert y_final.shape == (B, n_outputs), (
             f"y_final shape 应为 ({B}, {n_outputs})，实为 {tuple(y_final.shape)}"
@@ -46,9 +46,9 @@ class TestGatedEnsembleBehavior:
 
         x      = torch.randn(B, input_dim)
         y_slow = torch.rand(B, 1)
-        y_fast = torch.rand(B, 1)
+        correction = torch.rand(B, 1)
 
-        _, weights = model(x, y_slow, y_fast)
+        _, weights = model(x, y_slow, correction)
         row_sums = weights.sum(dim=-1)  # (B,)
 
         for i, s in enumerate(row_sums):
@@ -77,10 +77,10 @@ class TestGatedEnsembleBehavior:
 
         x      = torch.randn(B, input_dim)
         y_slow = torch.rand(B, 1)
-        y_fast = torch.rand(B, 1)
+        correction = torch.rand(B, 1)
         y_true = torch.randint(0, 2, (B, 1)).float()
 
-        y_final, _ = model(x, y_slow, y_fast)
+        y_final, _ = model(x, y_slow, correction)
         loss = torch.nn.functional.binary_cross_entropy_with_logits(y_final, y_true)
         loss.backward()
 
@@ -112,10 +112,42 @@ class TestGatedEnsembleBehavior:
 
         x      = torch.randn(B, input_dim)
         y_slow = torch.rand(B, 1)
-        y_fast = torch.rand(B, 1)
+        correction = torch.rand(B, 1)
 
         with torch.no_grad():
-            y_final, weights = model(x, y_slow, y_fast)
+            y_final, weights = model(x, y_slow, correction)
 
         assert y_final.shape == (B, 1)
         assert weights.shape == (B, 3)
+
+    def test_y_final_raw_can_be_outside_unit_interval(self):
+        """v2 residual-additive fusion：forward 返回的 y_final_raw 不做 clamp。
+
+        构造大正 correction → 结果应 > 1；
+        构造大负 correction → 结果应 < 0。
+        两者都成立才能证明 forward 内没有隐式 clamp。
+        """
+        torch.manual_seed(42)
+        input_dim = 10
+        model = GatedEnsemble(input_dim=input_dim, hidden_dim=64, n_outputs=1)
+        model.eval()
+
+        x = torch.randn(1, input_dim)
+
+        # 大正 correction：y_slow=0.9，correction=+5.0 → 期望 y_final_raw > 1
+        y_slow_high = torch.tensor([[0.9]])
+        correction_large_pos = torch.tensor([[5.0]])
+        with torch.no_grad():
+            y_raw_high, _ = model(x, y_slow_high, correction_large_pos)
+        assert y_raw_high.item() > 1.0, (
+            f"期望 y_final_raw > 1.0（未 clamp），实为 {y_raw_high.item():.4f}"
+        )
+
+        # 大负 correction：y_slow=0.1，correction=-5.0 → 期望 y_final_raw < 0
+        y_slow_low = torch.tensor([[0.1]])
+        correction_large_neg = torch.tensor([[-5.0]])
+        with torch.no_grad():
+            y_raw_low, _ = model(x, y_slow_low, correction_large_neg)
+        assert y_raw_low.item() < 0.0, (
+            f"期望 y_final_raw < 0.0（未 clamp），实为 {y_raw_low.item():.4f}"
+        )
