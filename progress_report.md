@@ -229,6 +229,116 @@ if fast_corrector.should_consolidate(): consolidator.consolidate(...)
 
 ---
 
-## 下一步
+## Phase 3 诊断旅程：4-way ablation + 三轮 architectural iteration
 
-- **Phase 4**（待启动）：基于 Phase 3D 的负面发现，先调 gate 训练策略（节流 / entropy 正则）和 consolidation 触发条件，再做真实数据集验证（需 GPU）。
+Phase 3D 的负面发现（regime_switching −4.57 pp）触发了一轮系统诊断与架构迭代。本节记录所做实验、数据与结论，作为 Phase 5 论文 "Phase 3 负面分析章节" 的素材。
+
+### 4-way ablation（在 v1 代码上做）
+
+固定数据集 = `regime_switching`（最痛点），探索 lr 与 consolidation 阈值对 Phase 3 表现的影响：
+
+| 配置 | 总体准确率 | 漂移后 | 巩固事件 | commit |
+|---|---|---|---|---|
+| baseline (lr=1e-3, threshold=0.05) | 77.93% | 63.80% | 0 | 90b2096 |
+| `--lr 0`（关掉 per-step 训练） | 68.71% | 57.00% | 0 | 372c250 |
+| `--lr 1e-5`（弱训练） | **52.18%** | 49.80% | 0 | 372c250 |
+| `--consolidation_threshold 0.01`（放宽阈值） | 78.93% | 63.60% | 0 | 372c250 |
+
+**关键发现**：
+1. **per-step MSE 训练不是元凶**：关掉 (lr=0) 反而下降 9.2 pp；弱化 (lr=1e-5) 进一步下降 25.7 pp（接近 chance 50%）。lr 与系统表现非单调相关，1e-3 是局部最优。
+2. **threshold 不是巩固卡死的元凶**：降到 1/5 (0.01) 仍然 0 触发。瓶颈在 `should_consolidate` 的 `std < |mean|` 复合规则 —— 对二分类 buffer errors 结构性过严。
+3. **gate 权重 close-up 分析**（[results/phase3_regime_switching_gate_zoom.png](results/phase3_regime_switching_gate_zoom.png)）：β 几乎恒为 0（≤0.04），α 长期主导（0.72-0.95），γ 偶有上跳但跨 5 个 drift point 反应不一致。
+
+→ 排除 lr / threshold 作为根因，转向架构改造。
+
+### v2 (option A)：残差加法融合替代软加权
+
+**改动**：fusion 公式从软加权概率 `α·y_slow + β·y_inter + γ·y_fast` 改为残差累加 `y_slow + β·y_inter + γ·correction`（adapter 输出和 correction 都作为残差，y_slow 永远全权重 base）。
+
+**动机**：v1 数学展开后等价于 `y_slow + γ·correction`，correction 被 γ 衰减；v2 让 correction 名义上"全功率参与"。
+
+**结果**：78.75%（+0.82 pp from v1），漂移后基本不变。
+
+**复盘**：诊断后发现这是**预期失败** —— 当 β ≈ 0（v1 实测如此），v1 公式 `(1-β)·y_slow + β·y_inter + γ·correction` 和 v2 公式 `y_slow + β·y_inter + γ·correction` 几乎完全相同，差别只在 y_slow 的系数（v1 是 1-β ≈ 1，v2 是 1）。**v2 在 β=0 的现实下与 v1 数学等价**，不应有显著改善。
+
+教训：架构改动的预期收益必须在数学上做完整推导，不能只看"看起来不同"。
+
+### B：放宽 consolidation 触发条件
+
+**改动**：删除 `should_consolidate` 的 `std < |mean|` 复合条件，仅保留 `|mean_err| > bias_threshold`。
+
+**动机**：4 ablation 全部 0 触发暴露原 AND 规则结构性过严 —— 二分类 buffer errors 几乎不可能同时满足"高均值偏移"和"低方差"。
+
+**结果**：触发 45 次（首次非零），但总体 78.32%（−0.43 pp from v2），post-drift −2.20 pp。
+
+**复盘**：第一次触发在 step 282（早于第一个漂移点 500），稳定期就在反复触发；45 次 / 5 个 regime ≈ 每段 9 次。每次 consolidation 后 `buffer.clear()`，下次又用新 50 步重训，形成 **adapter thrashing** —— 永远学短期偏置、永远被覆盖、永远无法沉淀。
+
+post-drift 反而下降是因为：之前 β≈0 时 adapter 不工作但也不害人；放开 trigger 后 adapter 被乱训，β 大概率涨了，**不工作的 adapter 比工作的差 adapter 更安全**。
+
+### F：分离 optimizer + cooldown
+
+**改动**：
+1. GatedEnsemble 参数拆成 `gate_optimizer` / `adapter_optimizer`
+2. step() 内 per-step backward 仅 step gate；adapter 只通过 consolidation 训练
+3. Consolidation 加 cooldown=100，触发后强制等待避免 thrashing
+4. `scripts/run_phase3.py` 加 `--consolidation_cooldown` 参数
+
+**动机**：B 的 thrashing 因 adapter 同时被 per-step gradient 和 consolidation gradient 双重训练 —— per-step 不断把 adapter 推向短期信号，consolidation 又试图拉它学长期 buffer 偏置，互相冲突。F 让 adapter 只在 consolidation 时更新，期间冻结。
+
+**结果**：78.32%（与 B 相同），触发 24 次（cooldown 减半，符合预期），β均值=0.004。
+
+**复盘**：F 让 adapter 真正持久化训练之后，**gate 看到训练好的 adapter 输出，依然选择把 β 关到 0**。这不是工程 bug，是 gate 在告诉我们 adapter 输出本身有害，关掉比开着更好。
+
+### 三轮 architectural iteration 数据汇总
+
+| 配置 | 总体 | 漂移前 | 漂移后 | 巩固事件 | β均值 | commit |
+|---|---|---|---|---|---|---|
+| Phase 3D v1 | 77.93% | 83.60% | 63.80% | 0 | ~0 | 90b2096 |
+| v2 (residual fusion) | 78.75% | 83.60% | 64.20% | 0 | ~0 | 6928142 |
+| v2 + B (loose trigger) | 78.32% | 83.00% | 62.00% | 45 | - | 6928142 |
+| v2 + B + F (split optimizer) | 78.32% | 83.20% | 63.20% | 24 | 0.004 | 6928142 |
+| Phase 1 baseline (参考) | 82.96% | — | ~74% | — | — | 23b7ae3 |
+
+### 诊断结论
+
+经过 4 ablation + 3 轮 iteration，得到以下硬结论：
+
+1. **β = 0 是 gate 的 RATIONAL 选择**（不是 bug）：F 让 adapter 真正持久化训练后 β 仍然 ≈ 0.004，证明 gate 主动屏蔽 adapter 是基于实际数据做出的 loss-minimal 决策。adapter 输出对 y_final 是 net-negative。
+
+2. **adapter 在 regime_switching 上结构性失败**：训练信号是 buffer.errors（过去样本的 y_t − y_slow）；regime_switching 的 regime 间完全独立 → 没有可迁移 pattern；adapter 学的是"过去某段时间的局部偏置"，跨 regime 时不仅无效，常常方向相反。漂移期 adapter 主动施加错误校正，gate 不得不把 β 关死。
+
+3. **"中期可学习层"假设在 regime_switching 上不成立**：plan V2 的核心假设"adapter 学跨 regime 的 mid-timescale pattern"在 regime 间完全独立的数据生成机制下 structurally 不可能。这不是实现问题，是架构假设与数据不匹配。
+
+4. **Phase 3 在渐进漂移上 +1.18 pp 验证了 reverse**：当跨时间确实存在 transferable structure 时，adapter 确实能学到（虽然增益有限，可能在 std 之内 — 待 Phase 4 multi-seed 验证）。
+
+---
+
+## 外部 cross-review：4 家 LLM 独立共识
+
+为 cross-check 上述诊断，将完整的项目背景、数据、Phase 4 候选方案打包成 prompt 分发给 4 个独立模型：DeepSeek、Gemini、Qwen、零上下文 Claude。共识点：
+
+1. **TabPFN sliding context window 是被忽略的关键杠杆**（4/4 收敛）：所有模型独立指出，漂移后 context window 里 80% 是旧 regime 数据，污染 TabPFN in-context learning，可能占 Phase 1 漂移退步的大头。**Phase 3 整套架构都在 TabPFN 输出之后做修正，从未触及 TabPFN 自己的 context 管理**。这是真正的根因盲区。
+
+2. **drift detection 应在 1D 误差流上做**（4/4 收敛）：用 ADWIN / Page-Hinkley / CUSUM / BOCPD 等 streaming 文献的标准做法，在误差时间序列上检测变点，鲁棒性远高于在高维 TabPFN embedding 上做 K-means。V1 plan 砍 K-means 的理由（"高维聚类难"）适用于 embedding 空间，但 1D error stream 完全没问题。
+
+3. **multi-seed 缺失是方法学硬伤**（Claude 单独指出，但所有数字均为单 seed）：rotating_boundary 上 +1.18 pp 是单 run 结果，可能就是噪声。Phase 4 必须补 multi-seed 加 std。
+
+4. **设计 C（残差链无 gate）一致否决**（4/4）：β=0 已证明 adapter 输出有害，钉死 β=γ=1 是已证伪路径的延续。
+
+完整 4 模型回答见对话存档；整合后的 Phase 4 plan 见 [phase4_plan.md](phase4_plan.md)。
+
+---
+
+## 下一步：Phase 4 — Cheap Diagnostic + Decision Branch
+
+详见 [phase4_plan.md](phase4_plan.md)。核心结构：
+
+- **Day 0.5 Cheap Diagnostic**（并行做）
+  - 实验 0a：Oracle context-reset on regime_switching（验证 LLM 共识假说）
+  - 实验 0b：Multi-seed (5) 重跑现有 Phase 1/2/3 v2+B+F（补方法学硬伤）
+- **决策点**：基于 Oracle 总体准确率 + multi-seed std，按 4 行规则表选 Design E 或 Design A
+- **Design E**：Dynamic Context Reset + ADWIN，砍 adapter（如 Oracle ≥ 82%）
+- **Design A**：Regime Detection + Adapter Library，per-regime 隔离（如 Oracle < 80%，或介于但 adapter 在 std 之外仍有效）
+- **Phase 5**：论文撰写，framing 看走 E 还是 A
+
+Phase 4 启动后所有结果回写本报告 "Phase 4" 段。
