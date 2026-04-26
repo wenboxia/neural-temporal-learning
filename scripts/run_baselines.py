@@ -53,7 +53,13 @@ def parse_args():
     parser.add_argument("--max_eval_steps", type=int, default=None, help="最多评估多少步（调试用，None = 全量）")
     parser.add_argument("--fixed_ratio", type=float, default=0.0,
                         help="固定池占 context 比例（0=纯滑动窗口，0.67=200固定+100滑动）")
+    parser.add_argument("--oracle_context_reset", action="store_true",
+                        help="在已知 drift_points 处强制截断 context，仅保留 post-drift 样本")
+    parser.add_argument("--reset_size", type=int, default=50,
+                        help="oracle reset 时保留的最近样本数（context 从该值增长回 context_size）")
     parser.add_argument("--results_dir", type=str, default="results", help="输出目录")
+    parser.add_argument("--out_tag", type=str, default=None,
+                        help="输出文件名后缀（默认按 dataset/fixed_ratio 自动生成）")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -116,13 +122,31 @@ def run_tabpfn_baseline(args):
     print(f"\n开始 Prequential 评估（共 {total_steps} 步）...")
     print("注意：首步需要下载/加载 TabPFN 权重，可能需要几秒钟。\n")
 
+    drift_points_set = set(int(d) for d in dataset.drift_points)
+    last_drift_t = None
+    n_truncations = 0
+
     start_total = time.time()
     for i, batch in enumerate(loader):
         if i >= total_steps:
             break
 
+        X_ctx, y_ctx = batch.X_ctx, batch.y_ctx
+
+        if args.oracle_context_reset:
+            t_abs = batch.t
+            if t_abs in drift_points_set:
+                last_drift_t = t_abs
+                print(f"  [oracle] drift @ t={t_abs} → reset context to last {args.reset_size}")
+            if last_drift_t is not None:
+                max_ctx = min(args.reset_size + (t_abs - last_drift_t), args.context_size)
+                if max_ctx < len(X_ctx):
+                    X_ctx = X_ctx[-max_ctx:]
+                    y_ctx = y_ctx[-max_ctx:]
+                    n_truncations += 1
+
         t0 = time.time()
-        _, pred_label = model.predict(batch.X_ctx, batch.y_ctx, batch.X_query)
+        _, pred_label = model.predict(X_ctx, y_ctx, batch.X_query)
         step_times.append(time.time() - t0)
 
         all_preds.append(pred_label[0])
@@ -212,22 +236,32 @@ def run_tabpfn_baseline(args):
         axes[1].axvline(dp, color="red", linestyle="--", alpha=0.5, linewidth=1)
 
     plt.tight_layout()
-    ratio_suffix = f"_fr{args.fixed_ratio:.2f}" if args.fixed_ratio > 0 else ""
-    out_path = os.path.join(args.results_dir, f"baseline_{args.dataset}{ratio_suffix}.png")
+    if args.out_tag is not None:
+        stem = args.out_tag
+    else:
+        ratio_suffix = f"_fr{args.fixed_ratio:.2f}" if args.fixed_ratio > 0 else ""
+        stem = f"baseline_{args.dataset}{ratio_suffix}"
+    out_path = os.path.join(args.results_dir, f"{stem}.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"图表已保存至: {out_path}")
 
     # 6. 保存数值结果
     np.savez(
-        os.path.join(args.results_dir, f"baseline_{args.dataset}{ratio_suffix}.npz"),
+        os.path.join(args.results_dir, f"{stem}.npz"),
         predictions=all_preds,
         labels=all_labels,
         drift_points=np.array(dataset.drift_points),
         window_accs=win_accs,
         overall_acc=np.array([results["overall_acc"]]),
+        oracle_context_reset=np.array([int(args.oracle_context_reset)]),
+        reset_size=np.array([args.reset_size]),
+        n_truncations=np.array([n_truncations]),
+        seed=np.array([args.seed]),
     )
-    print(f"数值结果已保存至: results/baseline_{args.dataset}{ratio_suffix}.npz")
+    print(f"数值结果已保存至: results/{stem}.npz")
+    if args.oracle_context_reset:
+        print(f"  oracle 截断步数累计: {n_truncations}")
 
     return results
 

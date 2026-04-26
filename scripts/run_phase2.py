@@ -50,6 +50,8 @@ def parse_args():
     parser.add_argument("--n_estimators", type=int, default=4)
     parser.add_argument("--max_eval_steps", type=int, default=None)
     parser.add_argument("--results_dir", type=str, default="results")
+    parser.add_argument("--out_tag", type=str, default=None,
+                        help="输出文件名 stem（默认 phase2_{dataset}）")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -246,21 +248,22 @@ def main():
     axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    out_path = os.path.join(args.results_dir, f"phase2_{args.dataset}.png")
+    stem = args.out_tag if args.out_tag is not None else f"phase2_{args.dataset}"
+    out_path = os.path.join(args.results_dir, f"{stem}.png")
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"图表已保存至: {out_path}")
 
     # ---- 保存数值结果 ----
     np.savez(
-        os.path.join(args.results_dir, f"phase2_{args.dataset}.npz"),
+        os.path.join(args.results_dir, f"{stem}.npz"),
         drift_points=np.array(dataset.drift_points),
         **{f"win_accs_{k.replace(' ', '_').replace('+', 'p')}": v
            for k, v in all_win_accs.items()},
         **{f"overall_acc_{k.replace(' ', '_').replace('+', 'p')}":
            np.array([v["overall_acc"]]) for k, v in all_results.items()},
     )
-    print(f"数值结果已保存至: results/phase2_{args.dataset}.npz")
+    print(f"数值结果已保存至: results/{stem}.npz")
 
 
 if __name__ == "__main__":

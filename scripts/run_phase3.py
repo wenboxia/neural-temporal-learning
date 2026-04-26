@@ -64,6 +64,8 @@ def parse_args():
                         help="最多评估步数（None = 跑完全部）")
     parser.add_argument("--results_dir", type=str, default="results",
                         help="结果输出目录")
+    parser.add_argument("--out_tag", type=str, default=None,
+                        help="输出文件名 stem（默认 phase3_{dataset}）")
     parser.add_argument("--seed", type=int, default=42,
                         help="随机种子")
 
@@ -277,13 +279,14 @@ def main():
     axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    png_path = os.path.join(args.results_dir, f"phase3_{args.dataset}.png")
+    stem = args.out_tag if args.out_tag is not None else f"phase3_{args.dataset}"
+    png_path = os.path.join(args.results_dir, f"{stem}.png")
     plt.savefig(png_path, dpi=150, bbox_inches="tight")
     plt.close()
     print(f"图表已保存至: {png_path}")
 
     # ── 保存数值结果 ──────────────────────────────────────────────────────
-    npz_path = os.path.join(args.results_dir, f"phase3_{args.dataset}.npz")
+    npz_path = os.path.join(args.results_dir, f"{stem}.npz")
     np.savez(
         npz_path,
         predictions=preds_arr,
