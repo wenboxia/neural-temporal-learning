@@ -1,0 +1,407 @@
+[
+  {
+    "config": "phase1",
+    "dataset": "regime_switching",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 3777.508535861969,
+    "overall_acc": 0.7846428571428572,
+    "log": "logs/multiseed/multiseed_phase1_regime_switching_seed42.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "regime_switching",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 3787.635026216507,
+    "overall_acc": 0.8092857142857143,
+    "log": "logs/multiseed/multiseed_phase1_regime_switching_seed456.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "regime_switching",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 3827.8556830883026,
+    "overall_acc": 0.795,
+    "log": "logs/multiseed/multiseed_phase1_regime_switching_seed123.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "regime_switching",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 2903.0424239635468,
+    "overall_acc": 0.7982142857142858,
+    "log": "logs/multiseed/multiseed_phase1_regime_switching_seed1024.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "regime_switching",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 2915.259053707123,
+    "overall_acc": 0.8071428571428572,
+    "log": "logs/multiseed/multiseed_phase1_regime_switching_seed789.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "regime_switching",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 8250.571907758713,
+    "overall_acc": 0.7885714285714286,
+    "log": "logs/multiseed/multiseed_phase2_regime_switching_seed42.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "regime_switching",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 7885.007381916046,
+    "overall_acc": 0.8114285714285714,
+    "log": "logs/multiseed/multiseed_phase2_regime_switching_seed456.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "regime_switching",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 8105.364371061325,
+    "overall_acc": 0.7942857142857143,
+    "log": "logs/multiseed/multiseed_phase2_regime_switching_seed123.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "regime_switching",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 2772.8121502399445,
+    "overall_acc": 0.7875,
+    "log": "logs/multiseed/multiseed_phase3_regime_switching_seed42.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "regime_switching",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 2640.3794701099396,
+    "overall_acc": 0.7925,
+    "log": "logs/multiseed/multiseed_phase3_regime_switching_seed123.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "regime_switching",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 8220.292782068253,
+    "overall_acc": 0.8067857142857143,
+    "log": "logs/multiseed/multiseed_phase2_regime_switching_seed789.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "regime_switching",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 2573.570806980133,
+    "overall_acc": 0.8035714285714286,
+    "log": "logs/multiseed/multiseed_phase3_regime_switching_seed456.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "regime_switching",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 2603.6835989952087,
+    "overall_acc": 0.8042857142857143,
+    "log": "logs/multiseed/multiseed_phase3_regime_switching_seed789.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "regime_switching",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 8328.121868133545,
+    "overall_acc": 0.7953571428571429,
+    "log": "logs/multiseed/multiseed_phase2_regime_switching_seed1024.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "regime_switching",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 1500.645528793335,
+    "overall_acc": 0.7975,
+    "log": "logs/multiseed/multiseed_phase3_regime_switching_seed1024.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "rotating_boundary",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 2689.274163007736,
+    "overall_acc": 0.8302083333333333,
+    "log": "logs/multiseed/multiseed_phase1_rotating_boundary_seed42.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "rotating_boundary",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 2696.514416217804,
+    "overall_acc": 0.8183333333333334,
+    "log": "logs/multiseed/multiseed_phase1_rotating_boundary_seed456.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "rotating_boundary",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 2697.0144069194794,
+    "overall_acc": 0.8191666666666667,
+    "log": "logs/multiseed/multiseed_phase1_rotating_boundary_seed123.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "rotating_boundary",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 2726.6460950374603,
+    "overall_acc": 0.82,
+    "log": "logs/multiseed/multiseed_phase1_rotating_boundary_seed1024.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "rotating_boundary",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 2768.729353904724,
+    "overall_acc": 0.815625,
+    "log": "logs/multiseed/multiseed_phase1_rotating_boundary_seed789.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "rotating_boundary",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 4805.375449895859,
+    "overall_acc": 0.8307142857142857,
+    "log": "logs/multiseed/multiseed_phase2_rotating_boundary_seed42.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "rotating_boundary",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 4747.337903261185,
+    "overall_acc": 0.82,
+    "log": "logs/multiseed/multiseed_phase2_rotating_boundary_seed123.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "rotating_boundary",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 4773.538684844971,
+    "overall_acc": 0.8232142857142857,
+    "log": "logs/multiseed/multiseed_phase2_rotating_boundary_seed456.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "rotating_boundary",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 1515.4249238967896,
+    "overall_acc": 0.8378571428571429,
+    "log": "logs/multiseed/multiseed_phase3_rotating_boundary_seed42.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "rotating_boundary",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 4561.931654930115,
+    "overall_acc": 0.8075,
+    "log": "logs/multiseed/multiseed_phase2_rotating_boundary_seed789.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "rotating_boundary",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 1462.7644441127777,
+    "overall_acc": 0.8285714285714286,
+    "log": "logs/multiseed/multiseed_phase3_rotating_boundary_seed123.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "rotating_boundary",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 1469.4671800136566,
+    "overall_acc": 0.8360714285714286,
+    "log": "logs/multiseed/multiseed_phase3_rotating_boundary_seed456.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "rotating_boundary",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 1450.859118938446,
+    "overall_acc": 0.8185714285714286,
+    "log": "logs/multiseed/multiseed_phase3_rotating_boundary_seed789.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "rotating_boundary",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 4508.262039899826,
+    "overall_acc": 0.8278571428571428,
+    "log": "logs/multiseed/multiseed_phase2_rotating_boundary_seed1024.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "rotating_boundary",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 1341.6454570293427,
+    "overall_acc": 0.8321428571428572,
+    "log": "logs/multiseed/multiseed_phase3_rotating_boundary_seed1024.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "combined_drift",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 4416.101094007492,
+    "overall_acc": 0.8195833333333333,
+    "log": "logs/multiseed/multiseed_phase1_combined_drift_seed456.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "combined_drift",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 4417.478595256805,
+    "overall_acc": 0.81875,
+    "log": "logs/multiseed/multiseed_phase1_combined_drift_seed123.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "combined_drift",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 4467.628542900085,
+    "overall_acc": 0.820625,
+    "log": "logs/multiseed/multiseed_phase1_combined_drift_seed42.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "combined_drift",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 4476.684009075165,
+    "overall_acc": 0.8252083333333333,
+    "log": "logs/multiseed/multiseed_phase1_combined_drift_seed789.log"
+  },
+  {
+    "config": "phase1",
+    "dataset": "combined_drift",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 4494.639732122421,
+    "overall_acc": 0.8279166666666666,
+    "log": "logs/multiseed/multiseed_phase1_combined_drift_seed1024.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "combined_drift",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 13941.619851112366,
+    "overall_acc": 0.82125,
+    "log": "logs/multiseed/multiseed_phase2_combined_drift_seed42.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "combined_drift",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 13839.036754846573,
+    "overall_acc": 0.8170833333333334,
+    "log": "logs/multiseed/multiseed_phase2_combined_drift_seed456.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "combined_drift",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 14085.42419719696,
+    "overall_acc": 0.8183333333333334,
+    "log": "logs/multiseed/multiseed_phase2_combined_drift_seed123.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "combined_drift",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 4663.550705909729,
+    "overall_acc": 0.815,
+    "log": "logs/multiseed/multiseed_phase3_combined_drift_seed42.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "combined_drift",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 4627.1673040390015,
+    "overall_acc": 0.81125,
+    "log": "logs/multiseed/multiseed_phase3_combined_drift_seed123.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "combined_drift",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 14138.897905826569,
+    "overall_acc": 0.8210416666666667,
+    "log": "logs/multiseed/multiseed_phase2_combined_drift_seed789.log"
+  },
+  {
+    "config": "phase2",
+    "dataset": "combined_drift",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 14212.138471364975,
+    "overall_acc": 0.8272916666666666,
+    "log": "logs/multiseed/multiseed_phase2_combined_drift_seed1024.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "combined_drift",
+    "seed": 456,
+    "status": "ok",
+    "elapsed_sec": 4836.603434801102,
+    "overall_acc": 0.8154166666666667,
+    "log": "logs/multiseed/multiseed_phase3_combined_drift_seed456.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "combined_drift",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 4594.1883108615875,
+    "overall_acc": 0.821875,
+    "log": "logs/multiseed/multiseed_phase3_combined_drift_seed789.log"
+  },
+  {
+    "config": "phase3",
+    "dataset": "combined_drift",
+    "seed": 1024,
+    "status": "ok",
+    "elapsed_sec": 2976.628982067108,
+    "overall_acc": 0.825,
+    "log": "logs/multiseed/multiseed_phase3_combined_drift_seed1024.log"
+  }
+]
