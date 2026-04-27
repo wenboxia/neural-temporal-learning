@@ -183,7 +183,7 @@ class MultiTimescaleModel:
                 delta=detector_delta,
                 min_subwindow=detector_min_subwindow,
                 max_window=max(2 * detector_min_subwindow, buffer_size * 4),
-                value_range=2.0,        # raw error ∈ [-1, 1]
+                value_range=1.0,        # |error| ∈ [0, 1] (option A: abs signal)
                 cooldown=detector_cooldown,
             )
             self.adapter_optimizer = None
@@ -288,7 +288,10 @@ class MultiTimescaleModel:
         # routing 后 detector.clear() 让 detector 从新 regime 重新积累。
         # buffer 在 consolidate() 内部统一被 reset。
         if self.use_adapter_library and self.detector is not None:
-            detector_drift = self.detector.update(error)
+            # Option A: feed |error| ∈ [0,1]; raw error mean≈0 in class-balanced regimes
+            # makes ADWIN structurally blind. |error| jumps cleanly on regime switch
+            # (correctness rate change → mean shift in absolute residual).
+            detector_drift = self.detector.update(abs(error))
             if detector_drift:
                 self.detector_events.append(t)
             should_trigger = detector_drift
