@@ -311,6 +311,14 @@ post-drift 反而下降是因为：之前 β≈0 时 adapter 不工作但也不�
 
 4. **Phase 3 在渐进漂移上 +1.18 pp 验证了 reverse**：当跨时间确实存在 transferable structure 时，adapter 确实能学到（虽然增益有限，可能在 std 之内 — 待 Phase 4 multi-seed 验证）。
 
+> ⚠️ **Phase 4 Day 0.5 重要修正**（2026-04-27）：multi-seed (n=5) 数据出来后，**结论 1-3 仍部分成立但叙事必须修正**：
+> - **结论 2 "adapter 在 regime_switching 上结构性失败" 被部分推翻**：multi-seed 显示 Phase 3 v2+B+F vs Phase 1 在 regime_switching 上是 -0.18pp NS（t=-1.27），不是单 seed 看到的 -4.5pp 灾难。"灾难" 是单 seed 抽样噪声。
+> - **β = 0 现象本身仍然成立**（结论 1 OK），但解释要弱化：gate 关掉 adapter 不是因为 "adapter 灾难性有害"，而是 "adapter 没贡献价值（neutral）"。
+> - **真正的 Phase 3 失败模式不在 regime_switching，在 combined_drift**：multi-seed 显示 -0.47pp sig 负向（t=-5.62, 5/5 同向），这才是可重现的失败。共享 adapter 在混合漂移的两个 regime 间互相冲销。
+> - **结论 4 +1.18pp 在 multi-seed 验证为 +1.00pp sig**（t=+4.07），是真实的赢点。
+> 
+> 完整 Day 0.5 结果见下方"Phase 4 Day 0.5"段。
+
 ---
 
 ## 外部 cross-review：4 家 LLM 独立共识
@@ -329,16 +337,103 @@ post-drift 反而下降是因为：之前 β≈0 时 adapter 不工作但也不�
 
 ---
 
-## 下一步：Phase 4 — Cheap Diagnostic + Decision Branch
+## Phase 4 Day 0.5 — Cheap Diagnostic 完成（2026-04-27）
 
-详见 [phase4_plan.md](phase4_plan.md)。核心结构：
+按 [phase4_plan.md](phase4_plan.md) 的 Day 0.5 spec 完成两个并行实验。
 
-- **Day 0.5 Cheap Diagnostic**（并行做）
-  - 实验 0a：Oracle context-reset on regime_switching（验证 LLM 共识假说）
-  - 实验 0b：Multi-seed (5) 重跑现有 Phase 1/2/3 v2+B+F（补方法学硬伤）
-- **决策点**：基于 Oracle 总体准确率 + multi-seed std，按 4 行规则表选 Design E 或 Design A
-- **Design E**：Dynamic Context Reset + ADWIN，砍 adapter（如 Oracle ≥ 82%）
-- **Design A**：Regime Detection + Adapter Library，per-regime 隔离（如 Oracle < 80%，或介于但 adapter 在 std 之外仍有效）
-- **Phase 5**：论文撰写，framing 看走 E 还是 A
+### 实验 0a：Oracle Context-Reset on regime_switching
 
-Phase 4 启动后所有结果回写本报告 "Phase 4" 段。
+**实现**：在 `scripts/run_baselines.py` 加 `--oracle_context_reset` / `--reset_size` flag；命中已知 drift_point 后持续 soft reset（drift 后所有步都截断 context 到 `reset_size + (t - last_drift_t)`，从 50 平滑增长回 200）。
+
+**5 seeds × 2 配置 = 10 runs**（regime_switching, n_samples=3000, context_size=200）：
+
+| 指标 | Baseline | Oracle reset_size=50 | Δ | Paired t (n=5) |
+|---|---|---|---|---|
+| **总体 acc** | 79.89 ± 0.99% | **80.39 ± 0.87%** | **+0.51 pp** | **+3.25 ✓ p<0.05** |
+| 漂移前 acc | 82.36 ± 1.41% | 82.36 ± 1.41% | 0 | — |
+| 漂移后 acc | 66.32 ± 3.23% | 68.68 ± 2.31% | +2.36 pp | +2.45 ≈ p=0.07 |
+| 适应速度 | 68.4 ± 10.8 步 | 59.3 ± 8.6 步 | **−9.08 步** | **−4.72 ✓✓ 强显著** |
+
+**关键洞察**：Oracle 只挽回 post-drift 损失的 ~1/3（漂移退步 ~12-13pp，Oracle 仅挽回 +2.36pp）。**context 污染是 lever 但不是 THE lever**，剩余 ~2/3 是 TabPFN 在新 regime 上 in-context learning 本身的样本不足。
+
+→ Oracle 总体准确率 80.39% 落在决策表 **80-82% 中段**。
+
+### 实验 0b：Multi-seed (5) 重跑现有 Phase 1 / 2 / 3 v2+B+F
+
+**自动化**：新建 `scripts/run_multiseed.py`，3 phase × 3 dataset × 5 seeds = **45 runs**。Wall time ~22h（n_parallel=3 on 10 cores；combined_drift 上 phase2 单脚本跑 3 corrector 是主要耗时源）。
+
+**Phase 3 v2+B+F vs Phase 1 baseline**（paired t, df=4, critical |t|≈2.78）：
+
+| 数据集 | 单 seed 旧值 | multi-seed Δ (n=5) | Paired t | 显著性 |
+|---|---|---|---|---|
+| **regime_switching** | -4.57 pp | **-0.18 pp** | -1.27 | **NS**（不显著）|
+| `rotating_boundary` | +1.18 pp | **+1.00 pp** | **+4.07** | ✓ sig（5/5 同向）|
+| `combined_drift` | -0.19 pp | **-0.47 pp** | **-5.62** | ✓ sig 负向（5/5 同向）|
+
+**Phase 2 KNN vs Phase 1 baseline**：三数据集**全部 NS**。
+
+### 重大叙事修正
+
+1. **Phase 3 在 regime_switching 上的 -4.5pp 灾难是单 seed 抽样噪声**。multi-seed 后归零至 NS。先前 Phase 3 v2/B/F 三轮 architectural iteration 本质上是"修一个不存在的灾难"。但发现的 β=0 现象本身仍是有效观察（adapter neutral 而非有害）。
+
+2. **Phase 3 真正的失败模式是 combined_drift -0.47pp 显著负向**（5/5 同向、强显著）。共享 adapter 在混合漂移的两个 regime 间互相冲销，这是 Phase 4 Design A 的真实 motivation。
+
+3. **rotating_boundary +1.00pp 显著确认**。Phase 3 唯一可重现的赢点。Design A 必须保住这个赢。
+
+4. **Phase 2 的 "+0.5pp 改进" 也是噪声**。multi-seed 显示 Phase 2 KNN 在三数据集上全部 NS。先前进展报告里的 "Phase 2 best 82.50%" 等说法不可作为 paper 主结果。
+
+### 决策：Design A
+
+按决策表，Oracle 80-82% × rotating_boundary 显著 → **Design A（per-regime adapter library）**。
+
+但**理由从初版的"救 regime_switching 灾难"转为新的两条**：
+- 保 rotating_boundary +1.00pp 显著赢（Design E 在渐进漂移上 ADWIN 不会触发，会丢掉这 +1pp 退回 Phase 1）
+- 救 combined_drift -0.47pp 显著退步（per-regime 隔离正面应对共享 adapter 冲销问题）
+- regime_switching 顺其自然（已 NS，期望仍 neutral）
+
+详见 `results/oracle_summary.md` / `results/multiseed_summary.md` / `results/day05_decision.md`，commits `0b64bed` + `37c5b56`。
+
+### 4 LLM cross-review 共识的事后评估
+
+LLM 那轮 review 给的两条核心洞察经 Day 0.5 实测得到部分验证：
+
+| LLM 共识 | 实测验证 | 评估 |
+|---|---|---|
+| TabPFN context window 是被忽略的杠杆 | Oracle +0.51pp sig, +2.36pp post-drift | **方向对，幅度小**（~1/3 of gap） |
+| drift detection 应在 1D error stream 而非高维 | Day 1.5 用 ADWIN，待验证 | 计划中 |
+| multi-seed 必须补 | 5 seeds 后 Phase 3 -4.5pp 归零至 NS | **强验证**（救了整个项目 framing） |
+| Design C (无 gate) 一致否决 | 未测试 | 不再考虑 |
+
+LLM cross-review 的**最高价值产出**：multi-seed 这个方法学要求。如果不补，Phase 5 论文会基于错误数字做出错误叙事。
+
+---
+
+## 下一步：Phase 4 Day 1.5 — Design A 实施
+
+按 [phase4_plan.md](phase4_plan.md) 的 "Design A" 段落执行。核心交付：
+
+- **新文件**：
+  - `src/drift/error_detector.py`：ADWIN（或 Page-Hinkley）在 1D 误差流上的变点检测
+  - `src/regime/adapter_library.py`：`AdapterLibrary` 类，`dict[int, MLP]` + 路由
+  - `scripts/run_phase4_a.py`：入口脚本
+  - 配套单测
+- **修改 `src/models/multi_timescale.py`**：加 detector + adapter_library；当前 active regime 的 adapter 才接收梯度，其它 frozen；consolidation 触发条件改成 "detector 报警 → 巩固当前 active adapter"
+- **实验**：三数据集 × 5 seeds × Design A = 15 runs；对比 Phase 1 / Phase 3 v2+B+F / **Design A**
+
+**验收**（基于 Day 0.5 multi-seed 修正后的真实 Phase 3 数字）：
+
+| 数据集 | Phase 3 v2+B+F (n=5) | Design A 验收线 |
+|---|---|---|
+| `regime_switching` | -0.18 pp NS | ≥ -1 pp（不打破 NS） |
+| `rotating_boundary` | **+1.00 pp sig** | ≥ +0.5 pp（保住主要赢点） |
+| `combined_drift` | **-0.47 pp sig 负向** | ≥ -0.1 pp（理想 ≥ +0.5 pp，翻转或消除显著退步） |
+
+**核心成功条件**：rotating_boundary 不丢的前提下，combined_drift 翻成 non-negative。
+
+预计 1.5-2 天工作量；Day 1.5 完成后所有结果回写本报告"Phase 4 Day 1.5"段。
+
+---
+
+## 下一步：Phase 5 — 论文撰写
+
+待 Phase 4 Day 1.5 完成后启动。Title 候选：*Per-Regime Adapter Libraries for Concept Drift on Frozen Tabular Foundation Models*。详见 [phase4_plan.md](phase4_plan.md) 的"论文 framing"段。
