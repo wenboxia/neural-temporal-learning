@@ -69,10 +69,11 @@ def build_base_cmd(config: str, dataset: str) -> list[str]:
 
 
 def out_tag(config: str, dataset: str, seed: int) -> str:
-    # Phase 4 A option-A 重跑：detector 输入由 raw error 改为 |error|（value_range=1.0）。
-    # 旧 raw run 已 mv 为 multiseed_phase4a_raw_*；新 abs run 用此命名，paper 引用清晰。
+    # Phase 4 A option-B 重跑：detector 输入改为 0/1 错误指示器。
+    # raw / abs run 已归档为 multiseed_phase4a_raw_* / multiseed_phase4a_abs_*；
+    # 新 indicator run 用 multiseed_phase4a_indicator_*。三种命名共存供 paper 三段对比。
     if config == "phase4a":
-        return f"multiseed_phase4a_abs_{dataset}_seed{seed}"
+        return f"multiseed_phase4a_indicator_{dataset}_seed{seed}"
     return f"multiseed_{config}_{dataset}_seed{seed}"
 
 
@@ -125,7 +126,7 @@ def read_phase4a_metrics(dataset: str, seed: int) -> dict | None:
 
 def append_phase4a_partial_row(rec: dict) -> None:
     """每个 phase4a 任务跑完，把这一行 append 到 partial md。"""
-    out_path = RESULTS_DIR / "multiseed_phase4a_abs.partial.md"
+    out_path = RESULTS_DIR / "multiseed_phase4a_indicator.partial.md"
     header = "| seed | dataset | overall_acc | post_drift_acc | n_routes | n_adapters | wall_time |\n"
     sep = "|---|---|---|---|---|---|---|\n"
     init = not out_path.exists()

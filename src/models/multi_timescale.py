@@ -131,6 +131,8 @@ class MultiTimescaleModel:
         self.consolidation_events: list = []
         self.detector_events: list = []           # 仅 use_adapter_library=True 时记录
         self.route_events: list = []              # list[(t, action, active_id)]
+        self.abs_error_history: list = []         # |error| 时序，diagnostic 用
+        self.indicator_history: list = []         # 0/1 错误指示器时序（option B detector 输入）
 
         # ── 子模块初始化 ──────────────────────────────────────────────
         self.slow_prior = SlowPrior(device=device, n_estimators=n_estimators)
@@ -288,10 +290,18 @@ class MultiTimescaleModel:
         # routing 后 detector.clear() 让 detector 从新 regime 重新积累。
         # buffer 在 consolidate() 内部统一被 reset。
         if self.use_adapter_library and self.detector is not None:
-            # Option A: feed |error| ∈ [0,1]; raw error mean≈0 in class-balanced regimes
-            # makes ADWIN structurally blind. |error| jumps cleanly on regime switch
-            # (correctness rate change → mean shift in absolute residual).
-            detector_drift = self.detector.update(abs(error))
+            # Option B: feed 0/1 错误指示器 = int((y_final >= 0.5) != y_t)。
+            # raw error 流（mean≈0）和 |error| 流（mean≈0.30 across regimes）的 mean shift
+            # 都被 TabPFN sliding-context 自适应消化掉，ADWIN 结构性看不到信号。
+            # indicator 直接是错误率信号：regime 切换后 acc 80%→60% → mean 0.20→0.40，
+            # mean shift ≈ 0.20，远大于 |error| 的 0.03。Step 1 sanity check 已证 δ=0.002 可触发。
+            # abs_error 仍 dump 供 raw/abs/indicator 三段对比。
+            abs_e = abs(error)
+            self.abs_error_history.append(abs_e)
+            y_pred_hard = 1 if torch.clamp(y_final_raw.detach(), 0.0, 1.0).item() >= 0.5 else 0
+            indicator = int(y_pred_hard != int(y_t))
+            self.indicator_history.append(indicator)
+            detector_drift = self.detector.update(float(indicator))
             if detector_drift:
                 self.detector_events.append(t)
             should_trigger = detector_drift

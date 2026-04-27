@@ -339,6 +339,8 @@ def main():
         route_active_id=route_active_id,
         n_adapters_final=np.array([model.adapter_library.n_adapters()]),
         seed=np.array([args.seed]),
+        abs_error_history=np.array(model.abs_error_history, dtype=np.float32),
+        indicator_history=np.array(model.indicator_history, dtype=np.int8),
     )
     print(f"数值结果已保存至: {npz_path}")
 
