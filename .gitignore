@@ -18,6 +18,9 @@ results/*.npy
 # Jupyter checkpoints
 .ipynb_checkpoints/
 
+# Run logs (per-seed and driver logs)
+logs/
+
 # Test cache
 .pytest_cache/
 

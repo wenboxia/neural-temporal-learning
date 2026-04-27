@@ -43,6 +43,8 @@ from src.models.slow_prior import SlowPrior
 from src.models.fast_corrector import FastCorrector
 from src.models.gated_ensemble import GatedEnsemble
 from src.consolidation.fast_to_inter import FastToInterConsolidation
+from src.drift.error_detector import ADWINErrorDetector
+from src.regime.adapter_library import AdapterLibrary
 
 
 class MultiTimescaleModel:
@@ -85,6 +87,13 @@ class MultiTimescaleModel:
         lr: float = 1e-3,
         device: str = "cpu",
         n_estimators: int = 4,
+        # ── Phase 4 A 扩展（默认 False = 完全等价 Phase 3 v2+B+F）──
+        use_adapter_library: bool = False,
+        max_adapters: int = 8,
+        library_fit_threshold: float = 0.05,
+        detector_delta: float = 0.002,
+        detector_min_subwindow: int = 30,
+        detector_cooldown: int = 80,
     ):
         """
         Args:
@@ -101,6 +110,13 @@ class MultiTimescaleModel:
             lr:                      Adam 学习率（gate optimizer 与 adapter optimizer 共用）
             device:                  "cpu"（TabPFN 约束，不支持其他设备）
             n_estimators:            TabPFN 集成数量
+            use_adapter_library:     Phase 4 A 开关。False（默认）= Phase 3 v2+B+F 行为；
+                                     True = 启用 ADWIN 检测 + 替换 GatedEnsemble.adapter 为 AdapterLibrary
+            max_adapters:            AdapterLibrary 容量上限（仅 use_adapter_library=True 时生效）
+            library_fit_threshold:   AdapterLibrary route 时复用现有 adapter 的 MSE 上限
+            detector_delta:          ADWIN 置信参数（越小越保守）
+            detector_min_subwindow:  ADWIN 切点两侧最小子窗
+            detector_cooldown:       ADWIN 漂移声明后冷却步数
         """
         assert input_dim > 0, f"input_dim 必须 > 0，收到: {input_dim}"
         assert device == "cpu", f"当前仅支持 CPU，收到: {device}"
@@ -109,9 +125,12 @@ class MultiTimescaleModel:
         self.consolidation_window = consolidation_window
         self.consolidation_threshold = consolidation_threshold
         self.consolidation_cooldown = consolidation_cooldown
+        self.use_adapter_library = use_adapter_library
         self._step_count: int = 0
         self._last_consolidation_t: float = -float('inf')
         self.consolidation_events: list = []
+        self.detector_events: list = []           # 仅 use_adapter_library=True 时记录
+        self.route_events: list = []              # list[(t, action, active_id)]
 
         # ── 子模块初始化 ──────────────────────────────────────────────
         self.slow_prior = SlowPrior(device=device, n_estimators=n_estimators)
@@ -139,9 +158,39 @@ class MultiTimescaleModel:
         self.gate_optimizer = torch.optim.Adam(
             self.gated_ensemble.gate.parameters(), lr=lr
         )
-        self.adapter_optimizer = torch.optim.Adam(
-            self.gated_ensemble.adapter.parameters(), lr=lr
-        )
+
+        # ── Phase 4 A：可选启用 AdapterLibrary + ADWINErrorDetector ──
+        # 默认 use_adapter_library=False 时走 Phase 3 v2+B+F 路径：
+        #   self.gated_ensemble.adapter 为单一 nn.Sequential，
+        #   self.adapter_optimizer 为该单一 adapter 的 Adam。
+        # 开启后：
+        #   self.gated_ensemble.adapter 被替换为 AdapterLibrary 实例（drop-in），
+        #   self.adapter_optimizer 设为 None（consolidate 时改用 library.active_optimizer()），
+        #   self.detector 为 ADWIN 实例，每步喂 raw error。
+        self.detector: ADWINErrorDetector | None = None
+        self.adapter_library: AdapterLibrary | None = None
+        if use_adapter_library:
+            self.adapter_library = AdapterLibrary(
+                input_dim=input_dim,
+                hidden_dim=gate_hidden_dim,
+                n_outputs=1,
+                max_adapters=max_adapters,
+                fit_threshold=library_fit_threshold,
+                lr=lr,
+            )
+            self.gated_ensemble.adapter = self.adapter_library  # drop-in
+            self.detector = ADWINErrorDetector(
+                delta=detector_delta,
+                min_subwindow=detector_min_subwindow,
+                max_window=max(2 * detector_min_subwindow, buffer_size * 4),
+                value_range=2.0,        # raw error ∈ [-1, 1]
+                cooldown=detector_cooldown,
+            )
+            self.adapter_optimizer = None
+        else:
+            self.adapter_optimizer = torch.optim.Adam(
+                self.gated_ensemble.adapter.parameters(), lr=lr
+            )
 
     # ------------------------------------------------------------------
     # 核心接口
@@ -209,10 +258,16 @@ class MultiTimescaleModel:
         )                                                  # (1,1), (1,3)
 
         # ── Step 4：每步 MSE 训练（偏离 plan V2 决策 1）────────────────
+        # Phase 3 F：per-step backward 仅 step gate；adapter 不动（其梯度需 zero 以防累积）。
+        # Phase 4 A：use_adapter_library=True 时 adapter_optimizer=None，
+        # adapter 的 zero_grad 改用 library.active_optimizer()（active adapter 的 Adam）。
         y_t_tensor = torch.tensor([[y_t]], dtype=torch.float32)            # (1, 1)
         loss = nn.functional.mse_loss(y_final_raw, y_t_tensor)
         self.gate_optimizer.zero_grad()
-        self.adapter_optimizer.zero_grad()   # 必须 zero 防 adapter grad 跨步累积
+        if self.use_adapter_library:
+            self.adapter_library.active_optimizer().zero_grad()
+        else:
+            self.adapter_optimizer.zero_grad()
         loss.backward()
         self.gate_optimizer.step()           # 仅 step gate；adapter 不动
 
@@ -221,22 +276,63 @@ class MultiTimescaleModel:
         self.fast_corrector.update(x_t, error)
 
         # ── Step 6：按需巩固 ─────────────────────────────────────────
-        if (t - self._last_consolidation_t >= self.consolidation_cooldown
+        # 触发逻辑：
+        #   - use_adapter_library=False（Phase 3 v2+B+F）：fast_corrector 的
+        #     bias-threshold + cooldown 触发 → consolidate 单一 adapter
+        #   - use_adapter_library=True （Phase 4 A）：ADWIN detector 在 raw error 流上
+        #     报警 → route + consolidate active adapter
+        #     不再用 bias-threshold，避免与 detector 抢事件并清空 buffer。
+        #     若 ADWIN 在某数据集上从不触发（如 rotating_boundary 渐进漂移），
+        #     adapter 仅靠 per-step gate 训练 + frozen 初始化参与融合，符合 YAGNI。
+        #
+        # routing 后 detector.clear() 让 detector 从新 regime 重新积累。
+        # buffer 在 consolidate() 内部统一被 reset。
+        if self.use_adapter_library and self.detector is not None:
+            detector_drift = self.detector.update(error)
+            if detector_drift:
+                self.detector_events.append(t)
+            should_trigger = detector_drift
+        else:
+            detector_drift = False
+            should_trigger = (
+                t - self._last_consolidation_t >= self.consolidation_cooldown
                 and self.fast_corrector.should_consolidate(
                     window=self.consolidation_window,
                     bias_threshold=self.consolidation_threshold,
-                )):
-            X_recent = self.fast_corrector.buffer.recent_features(
-                self.consolidation_window
+                )
             )
-            self.consolidator.consolidate(
-                gated_ensemble=self.gated_ensemble,
-                fast_corrector=self.fast_corrector,
-                X_recent=X_recent,
-                optimizer=self.adapter_optimizer,
-            )
-            self._last_consolidation_t = t
-            self.consolidation_events.append(t)
+
+        if should_trigger:
+            buf_len = len(self.fast_corrector.buffer)
+            if buf_len >= self.consolidation_window:
+                X_recent = self.fast_corrector.buffer.recent_features(
+                    self.consolidation_window
+                )
+                # detector 触发先做 routing：评估现有 / 新建 → 切 active
+                if detector_drift and self.adapter_library is not None:
+                    errs_recent = self.fast_corrector.buffer.recent_errors(
+                        self.consolidation_window
+                    )
+                    active_id, action, losses = self.adapter_library.route(
+                        X_recent, errs_recent, t=t,
+                    )
+                    self.route_events.append((t, action, active_id))
+                    self.detector.clear()
+
+                # consolidate：use_adapter_library=True 时用 active adapter 的 optimizer
+                opt = (
+                    self.adapter_library.active_optimizer()
+                    if self.use_adapter_library
+                    else self.adapter_optimizer
+                )
+                self.consolidator.consolidate(
+                    gated_ensemble=self.gated_ensemble,
+                    fast_corrector=self.fast_corrector,
+                    X_recent=X_recent,
+                    optimizer=opt,
+                )
+                self._last_consolidation_t = t
+                self.consolidation_events.append(t)
 
         self._step_count += 1  # 保留用于 __repr__ 调试展示，不再用于事件记录
 

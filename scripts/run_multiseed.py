@@ -34,7 +34,7 @@ LOGS_DIR = ROOT / "logs"
 
 SEEDS = [42, 123, 456, 789, 1024]
 DATASETS = ["regime_switching", "rotating_boundary", "combined_drift"]
-CONFIGS = ["phase1", "phase2", "phase3"]
+CONFIGS = ["phase1", "phase2", "phase3", "phase4a"]
 
 # 各 (config, dataset) 的 base 命令（不含 --seed / --out_tag）
 def build_base_cmd(config: str, dataset: str) -> list[str]:
@@ -45,6 +45,8 @@ def build_base_cmd(config: str, dataset: str) -> list[str]:
         script = "scripts/run_phase2.py"
     elif config == "phase3":
         script = "scripts/run_phase3.py"
+    elif config == "phase4a":
+        script = "scripts/run_phase4_a.py"
     else:
         raise ValueError(config)
 
@@ -95,6 +97,50 @@ def read_overall_acc(config: str, dataset: str, seed: int) -> float | None:
     if "overall_acc" in data.files:
         return float(data["overall_acc"][0])
     return None
+
+
+def read_phase4a_metrics(dataset: str, seed: int) -> dict | None:
+    """读取 phase4a npz 中的关键诊断字段（用于 partial md）。"""
+    path = npz_path("phase4a", dataset, seed)
+    if not path.exists():
+        return None
+    data = np.load(path, allow_pickle=True)
+    out = {
+        "overall_acc": float(data["overall_acc"][0]) if "overall_acc" in data.files else None,
+        "post_drift_acc": (
+            float(data["post_drift_acc"][0])
+            if "post_drift_acc" in data.files and not np.isnan(data["post_drift_acc"][0])
+            else None
+        ),
+        "n_routes": int(data["route_t"].shape[0]) if "route_t" in data.files else 0,
+        "n_adapters": int(data["n_adapters_final"][0]) if "n_adapters_final" in data.files else 1,
+        "n_detector_events": int(data["detector_events"].shape[0]) if "detector_events" in data.files else 0,
+    }
+    return out
+
+
+def append_phase4a_partial_row(rec: dict) -> None:
+    """每个 phase4a 任务跑完，把这一行 append 到 partial md。"""
+    out_path = RESULTS_DIR / "multiseed_phase4a.partial.md"
+    header = "| seed | dataset | overall_acc | post_drift_acc | n_routes | n_adapters | wall_time |\n"
+    sep = "|---|---|---|---|---|---|---|\n"
+    init = not out_path.exists()
+    metrics = read_phase4a_metrics(rec["dataset"], rec["seed"]) or {}
+    with open(out_path, "a") as fh:
+        if init:
+            fh.write("# Phase 4 A multi-seed partial summary (live)\n\n")
+            fh.write("Increment-appended after each finished seed. Re-run safe (no header dedup needed if file exists).\n\n")
+            fh.write(header)
+            fh.write(sep)
+        oa = metrics.get("overall_acc")
+        pd = metrics.get("post_drift_acc")
+        oa_s = f"{oa:.4f}" if oa is not None else "—"
+        pd_s = f"{pd:.4f}" if pd is not None else "—"
+        fh.write(
+            f"| {rec['seed']} | {rec['dataset']} | {oa_s} | {pd_s} | "
+            f"{metrics.get('n_routes', 0)} | {metrics.get('n_adapters', 1)} | "
+            f"{rec['elapsed_sec']:.0f}s |\n"
+        )
 
 
 def run_one(task: tuple[str, str, int], log_dir: Path) -> dict:
@@ -238,6 +284,8 @@ def main():
                     print(f"  [{rec['status']}] {rec['config']} / {rec['dataset']} / seed{rec['seed']} "
                           f"acc={rec['overall_acc']} elapsed={rec['elapsed_sec']:.0f}s log={rec['log']}")
                     write_partial_summary()
+                    if rec["config"] == "phase4a":
+                        append_phase4a_partial_row(rec)
 
     total_elapsed = time.time() - overall_t0
     print(f"\n=== ALL DONE in {total_elapsed/60:.1f} min ===")
