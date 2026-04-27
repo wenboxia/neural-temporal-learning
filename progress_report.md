@@ -408,29 +408,81 @@ LLM cross-review 的**最高价值产出**：multi-seed 这个方法学要求。
 
 ---
 
-## 下一步：Phase 4 Day 1.5 — Design A 实施
+## Phase 4 Day 1.5 — Design A 实施完成（2026-04-27）
 
-按 [phase4_plan.md](phase4_plan.md) 的 "Design A" 段落执行。核心交付：
+### 实施内容
+
+按 [phase4_plan.md](phase4_plan.md) "Design A" 段落，完成以下交付（commit 历史中可追溯）：
 
 - **新文件**：
-  - `src/drift/error_detector.py`：ADWIN（或 Page-Hinkley）在 1D 误差流上的变点检测
-  - `src/regime/adapter_library.py`：`AdapterLibrary` 类，`dict[int, MLP]` + 路由
-  - `scripts/run_phase4_a.py`：入口脚本
-  - 配套单测
-- **修改 `src/models/multi_timescale.py`**：加 detector + adapter_library；当前 active regime 的 adapter 才接收梯度，其它 frozen；consolidation 触发条件改成 "detector 报警 → 巩固当前 active adapter"
-- **实验**：三数据集 × 5 seeds × Design A = 15 runs；对比 Phase 1 / Phase 3 v2+B+F / **Design A**
+  - `src/drift/error_detector.py`：自包含 ADWIN 实现（不依赖 river），Hoeffding 切点扫描 + cooldown 抑制重复触发；6 条单测全过
+  - `src/regime/adapter_library.py`：`AdapterLibrary(nn.Module)` 类，`nn.ModuleDict[str(int), MLP]` + 硬路由 + 每 adapter 独立 Adam optimizer；8 条单测全过（含 isolation：非 active adapter 0 grad 验证）
+  - `scripts/run_phase4_a.py`：入口脚本，绘图含 active adapter id 轨迹 subplot
+- **修改** `src/models/multi_timescale.py`：加 `use_adapter_library` flag（默认 False = Phase 3 v2+B+F 行为不变，Phase 5 引用代码完整性保留）；True 时 drop-in 替换 `gated_ensemble.adapter` 为 AdapterLibrary，detector 在每步 raw error 上 update，触发逻辑改为纯 detector 驱动（routing → consolidate active）
+- **集成单测** `tests/test_multi_timescale_phase4a.py`：用 mock SlowPrior 注入受控 mean-shift，验证 detector + route + consolidate 全链路触发；3 条全过
+- **实验**：3 数据集 × 5 seeds × Phase 4 A = 15 runs，driver 总耗时 5.5 h，全部 status=ok
 
-**验收**（基于 Day 0.5 multi-seed 修正后的真实 Phase 3 数字）：
+详见 [results/phase4_a_summary.md](results/phase4_a_summary.md)。
 
-| 数据集 | Phase 3 v2+B+F (n=5) | Design A 验收线 |
-|---|---|---|
-| `regime_switching` | -0.18 pp NS | ≥ -1 pp（不打破 NS） |
-| `rotating_boundary` | **+1.00 pp sig** | ≥ +0.5 pp（保住主要赢点） |
-| `combined_drift` | **-0.47 pp sig 负向** | ≥ -0.1 pp（理想 ≥ +0.5 pp，翻转或消除显著退步） |
+### 数值结果
 
-**核心成功条件**：rotating_boundary 不丢的前提下，combined_drift 翻成 non-negative。
+n=5, mean ± std (ddof=1)：
 
-预计 1.5-2 天工作量；Day 1.5 完成后所有结果回写本报告"Phase 4 Day 1.5"段。
+| 数据集 | Phase 1 | Phase 3 v2+B+F | **Phase 4 A** |
+|---|---|---|---|
+| `regime_switching`  | 79.89 ± 0.99 % | 79.71 ± 0.72 % | 79.46 ± 1.01 % |
+| `rotating_boundary` | 82.07 ± 0.56 % | 83.06 ± 0.76 % | **83.42 ± 0.77 %** |
+| `combined_drift`    | 82.24 ± 0.40 % | 81.77 ± 0.56 % | 81.90 ± 0.47 % |
+
+Paired t-test，Phase 4 A vs Phase 1（n=5, df=4, |t|≥2.78 sig at α=0.05）：
+
+| 数据集 | Δ (pp) | t | sig? | 验收线 | 验收 |
+|---|---|---|---|---|---|
+| `regime_switching`  | −0.43 | −6.82 | ✓ sig 负向 | ≥ −1pp（不打破 NS） | △ 在 −1pp 内但从 NS 变 sig 负向 |
+| `rotating_boundary` | **+1.35** | +7.76 | ✓ **sig 正向** | ≥ +0.5pp | ✓ **超额完成** |
+| `combined_drift`    | −0.34 | −4.85 | ✓ sig 负向 | ≥ −0.1pp（理想 ≥ +0.5pp）| ✗ **未达**（仍 sig 负向）|
+
+Paired t-test，Phase 4 A vs Phase 3：三数据集**全部 NS**（Δ ∈ {−0.25, +0.36, +0.13}, |t| ∈ {1.59, 2.09, 1.10}）→ Phase 4 A 与 Phase 3 在统计上等价。
+
+### 关键诊断：detector 全程沉默（15/15 runs detector_events=0）
+
+**所有 15 个 run 的诊断字段相同**：
+- detector_events: 0
+- route_events: 0
+- consolidation_events: 0
+- n_adapters_final: 1（仅 adapter 0 全程 active）
+
+**根因**：ADWIN 看的是 raw error 流 `error = y_t − y_slow`，其中 y_slow ∈ [0,1] 为 TabPFN 概率。在 class-balanced 合成数据下，每个 regime 内**正反向误差均值抵消，raw error mean ≈ 0**。新 regime 进来时 |error| 分布拉宽但 mean 仍近 0 → ADWIN 切点检测的 |mean(W0)−mean(W1)| 结构性看不到信号。
+
+**对照实证**：
+- Step 1 sanity check 中 detector 在 0/1 indicator 流（错误率 ∈ [0,1]）上能触发 → detector 实现正确
+- 但接入完整管线 + raw error ∈ [−1,1] mean≈0 信号后静默 → 信号形态与 detector 输入假设不匹配
+
+**实际系统行为**：use_adapter_library=True 时砍掉了 bias-threshold 触发路径（避免与 detector 抢事件清空 buffer），detector 又不触发 → 系统退化为 "**没有 consolidation 的 Phase 3 v2**"。这与 paired t vs Phase 3 全 NS 完全吻合（少了 consolidation 但 consolidation 在 Phase 3 上贡献也 ≤ 0.5pp，差异淹没在 std 里）。
+
+### 验收结论
+
+phase4_plan 核心成功条件 = **"rotating 不丢 + combined 翻成 non-negative"**：
+- rotating_boundary：保住，且 +1.35pp 超过验收线 0.5pp（实际比 Phase 3 +0.36pp，但 NS）
+- combined_drift：仍 sig 负向 −0.34pp，**未翻转** → **核心问题未解决**
+
+phase4_plan 失败条件 = "rotating 失去 +1pp 赢点" → **未触发**（rotating 反而提升）。
+
+**整体定性**：Mixed bag, mostly null result。Design A 的"per-regime adapter library + routing"机制**在当前实现下未真正激活**。
+
+### Follow-up 选项（不做架构改动，仅修 detector 输入信号）
+
+- **选项 A**（推荐）：detector 输入从 raw error 改为 |error|（value_range=1.0）。最低改动，保留连续信号信息
+- **选项 B**：detector 输入改为 0/1 indicator 流（pred 是否 == label）。sanity check 已证能触发
+- **选项 C**：放宽 ADWIN 参数（value_range=2→1, delta 0.002→0.05）。风险：稳态期 false positive
+
+预计选项 A 单参数改动后重跑 5.5h，验证 detector 实际触发能否带动 combined_drift 翻转。
+
+### 数据 commits
+
+- Step 1-5（实施 + smoke）
+- Step 6（multi-seed 15 runs，全部 status=ok）
+- Step 7（[results/phase4_a_summary.md](results/phase4_a_summary.md) + 本段更新）
 
 ---
 
