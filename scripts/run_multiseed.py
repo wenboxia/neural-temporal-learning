@@ -69,11 +69,12 @@ def build_base_cmd(config: str, dataset: str) -> list[str]:
 
 
 def out_tag(config: str, dataset: str, seed: int) -> str:
-    # Phase 4 A 第四轮 (warmstart)：indicator detector + library_fit_threshold 0.05→0.5
-    # + AdapterLibrary 新建 adapter 时 warm-start 自当前 active 复制权重。
-    # 前三轮 (raw / abs / indicator) npz 全部保留作对照；新 run 落 multiseed_phase4a_warmstart_*。
+    # Phase 4 A 第五轮 (Day 2 confound-busting fit05random)：
+    # indicator detector + library_fit_threshold=0.5 + random init（不 warm-start）。
+    # 与 warmstart (fit=0.5, warm) 配对完成 2×2 析因网格的最后一格。
+    # 前四轮 npz 全部保留作对照；新 run 落 multiseed_phase4a_fit05random_*。
     if config == "phase4a":
-        return f"multiseed_phase4a_warmstart_{dataset}_seed{seed}"
+        return f"multiseed_phase4a_fit05random_{dataset}_seed{seed}"
     return f"multiseed_{config}_{dataset}_seed{seed}"
 
 
@@ -84,6 +85,10 @@ def npz_path(config: str, dataset: str, seed: int) -> Path:
 def build_full_cmd(config: str, dataset: str, seed: int) -> list[str]:
     cmd = build_base_cmd(config, dataset)
     cmd += ["--seed", str(seed), "--out_tag", out_tag(config, dataset, seed)]
+    # Day 2 confound-busting：phase4a 通过 driver 跑时强制 random init
+    # （脚本默认 init_strategy=warm，本轮要 fit05random）
+    if config == "phase4a":
+        cmd += ["--library_init_strategy", "random"]
     return cmd
 
 
@@ -126,7 +131,7 @@ def read_phase4a_metrics(dataset: str, seed: int) -> dict | None:
 
 def append_phase4a_partial_row(rec: dict) -> None:
     """每个 phase4a 任务跑完，把这一行 append 到 partial md。"""
-    out_path = RESULTS_DIR / "multiseed_phase4a_warmstart.partial.md"
+    out_path = RESULTS_DIR / "multiseed_phase4a_fit05random.partial.md"
     header = "| seed | dataset | overall_acc | post_drift_acc | n_routes | n_adapters | wall_time |\n"
     sep = "|---|---|---|---|---|---|---|\n"
     init = not out_path.exists()

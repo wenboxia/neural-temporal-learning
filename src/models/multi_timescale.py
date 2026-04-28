@@ -91,6 +91,7 @@ class MultiTimescaleModel:
         use_adapter_library: bool = False,
         max_adapters: int = 8,
         library_fit_threshold: float = 0.5,
+        library_init_strategy: str = "warm",
         detector_delta: float = 0.002,
         detector_min_subwindow: int = 30,
         detector_cooldown: int = 80,
@@ -179,6 +180,7 @@ class MultiTimescaleModel:
                 max_adapters=max_adapters,
                 fit_threshold=library_fit_threshold,
                 lr=lr,
+                init_strategy=library_init_strategy,
             )
             self.gated_ensemble.adapter = self.adapter_library  # drop-in
             self.detector = ADWINErrorDetector(

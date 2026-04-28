@@ -78,6 +78,10 @@ def parse_args():
     parser.add_argument("--library_fit_threshold", type=float, default=0.5,
                         help="route 时复用现有 adapter 的 MSE 上限（0.5 是 warmstart 默认；"
                              "v1 indicator run 用 0.05 导致 25/25 全 create 0 reuse）")
+    parser.add_argument("--library_init_strategy", type=str, default="warm",
+                        choices=["warm", "random"],
+                        help="新 adapter 初始化策略：warm=自 active 复制（Day 1.5 默认），"
+                             "random=永远随机初始化（Day 2 confound-busting）")
     parser.add_argument("--detector_delta", type=float, default=0.002,
                         help="ADWIN 置信参数（小=保守）")
     parser.add_argument("--detector_min_subwindow", type=int, default=30,
@@ -102,7 +106,8 @@ def main():
     print(f"context_size: {args.context_size} | window_size: {args.window_size}")
     print(f"buffer_size: {args.buffer_size} | fast_method: {args.fast_method}")
     print(f"max_adapters: {args.max_adapters} | "
-          f"library_fit_threshold: {args.library_fit_threshold}")
+          f"library_fit_threshold: {args.library_fit_threshold} | "
+          f"init_strategy: {args.library_init_strategy}")
     print(f"detector_delta: {args.detector_delta} | "
           f"min_subwindow: {args.detector_min_subwindow} | "
           f"cooldown: {args.detector_cooldown}")
@@ -150,6 +155,7 @@ def main():
         use_adapter_library=True,
         max_adapters=args.max_adapters,
         library_fit_threshold=args.library_fit_threshold,
+        library_init_strategy=args.library_init_strategy,
         detector_delta=args.detector_delta,
         detector_min_subwindow=args.detector_min_subwindow,
         detector_cooldown=args.detector_cooldown,
@@ -345,6 +351,7 @@ def main():
         n_warmstart_inits=np.array([model.adapter_library.n_warmstart_inits]),
         n_random_inits=np.array([model.adapter_library.n_random_inits]),
         library_fit_threshold=np.array([args.library_fit_threshold]),
+        library_init_strategy=np.array([args.library_init_strategy]),
     )
     print(f"数值结果已保存至: {npz_path}")
 

@@ -45,6 +45,7 @@ class AdapterLibrary(nn.Module):
         max_adapters: int = 8,
         fit_threshold: float = 0.05,
         lr: float = 1e-3,
+        init_strategy: str = "warm",
     ):
         """
         Args:
@@ -55,6 +56,11 @@ class AdapterLibrary(nn.Module):
             fit_threshold: 评估现有 adapter 时的 MSE 上限。
                            min_loss ≤ threshold → 复用；否则若未到 max → 新建
             lr:            每个 adapter 自带 Adam 的学习率
+            init_strategy: 新建 adapter 的初始化策略：
+                           "warm"   = non-init 时从当前 active 复制权重（Day 1.5 默认）
+                           "random" = 永远随机初始化（Day 2 confound-busting：
+                                      解 fit_threshold vs warm-start 的双变量耦合）
+                           init 时第一个 adapter 0 都走随机分支（self.adapters 为空时无 active 可复制）。
         """
         super().__init__()
         assert input_dim > 0
@@ -63,6 +69,9 @@ class AdapterLibrary(nn.Module):
         assert max_adapters >= 1
         assert fit_threshold > 0
         assert lr > 0
+        assert init_strategy in ("warm", "random"), (
+            f"init_strategy 必须 ∈ {{'warm', 'random'}}，收到: {init_strategy}"
+        )
 
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -70,6 +79,7 @@ class AdapterLibrary(nn.Module):
         self.max_adapters = max_adapters
         self.fit_threshold = fit_threshold
         self.lr = lr
+        self.init_strategy = init_strategy
 
         # nn.ModuleDict 用 str 键
         self.adapters: nn.ModuleDict = nn.ModuleDict()
@@ -124,7 +134,8 @@ class AdapterLibrary(nn.Module):
             and self._active_id >= 0
             and str(self._active_id) in self.adapters
         )
-        if has_existing_active:
+        do_warm = has_existing_active and self.init_strategy == "warm"
+        if do_warm:
             # warm-start：从当前 active adapter 复制权重
             src = self.adapters[str(self._active_id)]
             with torch.no_grad():
@@ -132,6 +143,7 @@ class AdapterLibrary(nn.Module):
                     p_dst.copy_(p_src)
             self.n_warmstart_inits += 1
         else:
+            # 随机初始化：(a) init 时 adapter 0；(b) init_strategy="random" 时所有 create
             self.n_random_inits += 1
 
         self.adapters[str(new_id)] = mlp

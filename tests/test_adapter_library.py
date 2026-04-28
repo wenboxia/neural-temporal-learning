@@ -213,6 +213,40 @@ class TestAdapterLibraryWarmStart:
             "warm-start 后 adapter 1 的初始权重应与 adapter 0 完全一致"
         )
 
+    def test_random_init_strategy_skips_warmstart(self):
+        """init_strategy='random' 时，即使有 active 也不 warm-start，全部走随机分支。"""
+        torch.manual_seed(30)
+        rng = np.random.default_rng(30)
+        lib = AdapterLibrary(
+            input_dim=4, hidden_dim=8, fit_threshold=1e-9, max_adapters=4, lr=1e-2,
+            init_strategy="random",
+        )
+        # adapter 0 训练成非随机
+        X = rng.normal(size=(40, 4)).astype(np.float32)
+        e = rng.normal(size=40).astype(np.float32)
+        opt = lib.active_optimizer()
+        for _ in range(50):
+            pred = lib(torch.tensor(X)).view(-1)
+            loss = torch.nn.functional.mse_loss(pred, torch.tensor(e))
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        w0 = lib.adapters["0"][0].weight.detach().clone()
+
+        # 触发 routing
+        lib.route(X, e, t=100)
+        assert lib.active_id == 1
+        assert lib.n_warmstart_inits == 0, (
+            f"init_strategy='random' 不应 warm-start，n_warmstart_inits={lib.n_warmstart_inits}"
+        )
+        assert lib.n_random_inits == 2, (
+            f"应有 2 次 random_inits（adapter 0 + adapter 1），实际 {lib.n_random_inits}"
+        )
+        w1 = lib.adapters["1"][0].weight.detach()
+        assert not torch.allclose(w0, w1), (
+            "random init 下 adapter 1 不应与 adapter 0 完全一致（应是新随机）"
+        )
+
     def test_warm_start_optimizer_state_is_fresh(self):
         """新 adapter 的 Adam 应是新建的，state 重置（不继承 active 的 momentum）。"""
         torch.manual_seed(22)
