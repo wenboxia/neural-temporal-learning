@@ -4,134 +4,134 @@
     "dataset": "regime_switching",
     "seed": 42,
     "status": "ok",
-    "elapsed_sec": 2518.5226831436157,
-    "overall_acc": 0.7882142857142858,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_regime_switching_seed42.log"
+    "elapsed_sec": 2138.586263895035,
+    "overall_acc": 0.7875,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed42.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 123,
     "status": "ok",
-    "elapsed_sec": 2519.1124958992004,
-    "overall_acc": 0.7871428571428571,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_regime_switching_seed123.log"
+    "elapsed_sec": 2172.996397972107,
+    "overall_acc": 0.7896428571428571,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed123.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 456,
     "status": "ok",
-    "elapsed_sec": 2190.1794102191925,
-    "overall_acc": 0.7953571428571429,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_regime_switching_seed456.log"
+    "elapsed_sec": 2070.8224687576294,
+    "overall_acc": 0.8046428571428571,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed456.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 789,
     "status": "ok",
-    "elapsed_sec": 2202.701788187027,
-    "overall_acc": 0.7964285714285714,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_regime_switching_seed789.log"
+    "elapsed_sec": 2083.319725036621,
+    "overall_acc": 0.8075,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed789.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 1024,
     "status": "ok",
-    "elapsed_sec": 2171.6748332977295,
-    "overall_acc": 0.7942857142857143,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_regime_switching_seed1024.log"
+    "elapsed_sec": 1798.5915400981903,
+    "overall_acc": 0.7907142857142857,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed1024.log"
+  },
+  {
+    "config": "phase4a",
+    "dataset": "rotating_boundary",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 1275.8268909454346,
+    "overall_acc": 0.8289285714285715,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed123.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 42,
     "status": "ok",
-    "elapsed_sec": 1538.0513079166412,
+    "elapsed_sec": 1293.625343322754,
     "overall_acc": 0.8439285714285715,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_rotating_boundary_seed42.log"
-  },
-  {
-    "config": "phase4a",
-    "dataset": "rotating_boundary",
-    "seed": 123,
-    "status": "ok",
-    "elapsed_sec": 1551.8234519958496,
-    "overall_acc": 0.8317857142857142,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_rotating_boundary_seed123.log"
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed42.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 456,
     "status": "ok",
-    "elapsed_sec": 1445.1774640083313,
-    "overall_acc": 0.8360714285714286,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_rotating_boundary_seed456.log"
+    "elapsed_sec": 1307.583990097046,
+    "overall_acc": 0.8296428571428571,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed456.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 789,
     "status": "ok",
-    "elapsed_sec": 1489.000398159027,
-    "overall_acc": 0.8242857142857143,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_rotating_boundary_seed789.log"
+    "elapsed_sec": 1303.7688481807709,
+    "overall_acc": 0.8282142857142857,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed789.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 1024,
     "status": "ok",
-    "elapsed_sec": 1514.524729013443,
-    "overall_acc": 0.8425,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_rotating_boundary_seed1024.log"
+    "elapsed_sec": 1174.6671288013458,
+    "overall_acc": 0.8385714285714285,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed1024.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 42,
     "status": "ok",
-    "elapsed_sec": 5421.256270170212,
-    "overall_acc": 0.816875,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_combined_drift_seed42.log"
+    "elapsed_sec": 3422.7062661647797,
+    "overall_acc": 0.8170833333333334,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed42.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 123,
     "status": "ok",
-    "elapsed_sec": 5429.5257563591,
-    "overall_acc": 0.815,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_combined_drift_seed123.log"
+    "elapsed_sec": 3441.923648118973,
+    "overall_acc": 0.8152083333333333,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed123.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 789,
     "status": "ok",
-    "elapsed_sec": 4187.591706037521,
-    "overall_acc": 0.823125,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_combined_drift_seed789.log"
+    "elapsed_sec": 3430.8929657936096,
+    "overall_acc": 0.8179166666666666,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed789.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 456,
     "status": "ok",
-    "elapsed_sec": 4249.887917757034,
-    "overall_acc": 0.8158333333333333,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_combined_drift_seed456.log"
+    "elapsed_sec": 3549.456362247467,
+    "overall_acc": 0.8139583333333333,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed456.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 1024,
     "status": "ok",
-    "elapsed_sec": 3852.2119040489197,
-    "overall_acc": 0.8275,
-    "log": "logs/multiseed/multiseed_phase4a_indicator_combined_drift_seed1024.log"
+    "elapsed_sec": 2843.368928194046,
+    "overall_acc": 0.8204166666666667,
+    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed1024.log"
   }
 ]
