@@ -638,6 +638,72 @@ Phase 5 论文章节大纲在 [phase4_final_verdict.md](results/phase4_final_ver
 
 ---
 
-## 下一步：Phase 5 — 论文撰写
+## Phase 3 → Phase 4 transition decisions（2026-04-28 补记）
 
-待 Phase 4 Day 1.5 完成后启动。Title 候选：*Per-Regime Adapter Libraries for Concept Drift on Frozen Tabular Foundation Models*。详见 [phase4_plan.md](phase4_plan.md) 的"论文 framing"段。
+Phase 3 multi-seed 收尾后，原计划是直接进论文撰写。但 Phase 3 发现 combined_drift 上 −0.47pp sig 负 + regime_switching NS + 仅 rotating_boundary +1.00pp sig 正，主线"shared adapter 三时间尺度"在 abrupt regime drift 上结构性失败（β ≈ 0 = 共享 adapter 无跨 regime transferable pattern）。
+
+四个候选方向当时讨论过：
+
+1. **MoE-style hard gating**：多 expert adapter，每步只激活一个，按 regime ID 路由
+2. **Per-regime parameter isolation**：每 regime 独立 adapter，跨 regime 不共享 gradient
+3. **Drift-detection-driven routing**：用 ADWIN / Page-Hinkley 在误差流上检测 → 触发 adapter 切换
+4. **Context-reset variants**：drift 后 sliding context 截断到最近 N，给 TabPFN 干净起点
+
+Phase 4 Day 0.5 先做 (4) 作为 cheap diagnostic（Oracle context-reset 在 regime_switching 上 +0.51pp sig，证明 context 是部分杠杆但仅占 ~1/3 损失），后定 Phase 4 Day 1.5 实施 **Design A = (1) + (2) + (3) 同时**：
+
+- AdapterLibrary = MoE-style 多 expert
+- Hard routing（每步只 active 一个 adapter）= hard gating
+- Per-regime 隔离（non-active adapter 零梯度）= parameter isolation
+- ADWIN on 误差流 = drift-detection-driven routing
+
+Phase 3 的 soft 3-way gate (α/β/γ for slow/inter/fast) **保留在输出层**做最终融合，但 inter level 内部从"单 adapter"换成 library 硬路由。**总架构 = 输出层 soft + 内层 hard 的混合**，不是纯 MoE。
+
+Day 1.5 四轮 ablation 结果证实 Design A 在合成数据上 mixed bag（rotating 保住 +1pp，combined 全 sig 负）。诊断三个 design lessons（避开自适应回路 / 信号 std 量级匹配 fit_threshold / init 策略与 drift type 耦合）作为论文核心 contribution。
+
+---
+
+## Phase 4 Day 2 — 收尾 (option B confound-busting)
+
+**待启动**。Day 1.5 warmstart 实验同时改了两个变量（`fit_threshold` 0.05→0.5 + init random→warm），2×2 析因网格缺一格 (fit_threshold=0.5, random init)。Day 2 补这格 = 5.5h × 1 round。
+
+完成后 Ch7 重写为干净的 2×2 析因，Ch6/Ch7 内容重叠问题自然解决。
+
+详见 [phase5_plan.md](phase5_plan.md) §0。
+
+---
+
+## Phase 5 — Real-World Validation
+
+**待启动**（Day 2 完成后）。导师要求最终发现必须真实数据验证。
+
+**锁定决策**：
+- 数据集 = **Electricity** (OpenML 151) + **Insects (incremental)**（gradual + regime 双覆盖）
+- combined_drift **无真实 analog**，仅作合成 stress test
+- Subsampling = **A+（3 contiguous 5000-sample 段 × 5 seeds × 3 phases = 45 runs/数据集）**
+- 真实数据**只跑 Phase 4 indicator**，不跑 raw/abs/warmstart（Day 1.5 已证 indicator 是唯一激活 detector 的 input）
+- **不跑 OpenML-CC18**（静态 benchmark）
+
+总实验量 **2 datasets × 45 runs = 90 runs ≈ 45h CPU**，分 2-3 日。
+
+完整 plan 见 [phase5_plan.md](phase5_plan.md)。
+
+---
+
+## Phase 6 — 论文撰写（Phase 5 完成后启动）
+
+**两个版本**：
+- **毕业论文版**：完整含 Phase 2/2.5 appendix；中文 + 英文摘要；Phase 5 即使"不复现"也大段讨论
+- **投稿版**：workshop 或 short paper；英文；删 appendix；主章节 ~8 章
+
+**核心定位**：负面结果 methodology paper，contribution = "在 TabPFN-class 自适应 in-context learner 之上做 concept drift adaptation 的设计 trap 系统性 mapping"。
+
+**论文 framing 改动**（2026-04-28 讨论结果）：
+
+1. 标题**去 PFC**，用 "Multi-Timescale" / "Hierarchical" 类 ML 术语
+2. Ch2.3 保留半页 PFC 灵感动机，明确写"frozen TabPFN 限制无 weight-level consolidation，故本文不声称生物建模"
+3. Ch6 = detector input ablation 三段（raw / abs / indicator），warmstart 移到 Ch7
+4. Ch7 = routing ablation 2×2 析因（fit_threshold × init），Day 2 完成后干净
+5. Ch9 = Real-World Validation（Phase 5 输出）
+6. Phase 2/2.5 → Appendix A
+
+完整大纲见 [phase5_plan.md](phase5_plan.md) §7.1 及 [results/phase4_final_verdict.md](results/phase4_final_verdict.md) §"论文章节大纲建议"。

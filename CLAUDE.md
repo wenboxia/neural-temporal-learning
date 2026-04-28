@@ -100,9 +100,9 @@ Orchestrator: `src/models/multi_timescale.py` `MultiTimescaleModel.step(X_ctx, y
 | `src/consolidation/fast_to_inter.py` | ✅ | `FastToInterConsolidation.consolidate(...)`: MSE-distill buffer errors → adapter; clears buffer after. |
 | `src/models/multi_timescale.py` | ✅ | `MultiTimescaleModel` orchestrator (Phase 3C). v2+B+F: separated gate/adapter optimizers + consolidation cooldown. |
 | `src/utils/metrics.py` | ✅ | `summarize_results()`, `window_accuracy()`, adaptation speed; balanced acc + AUC-ROC (Phase 2.5). |
-| `src/drift/error_detector.py` | 🚧 Phase 4 Day 1.5 | ADWIN / Page-Hinkley change-point detection on 1D error stream. |
-| `src/regime/adapter_library.py` | 🚧 Phase 4 Day 1.5 | Per-regime AdapterLibrary (dict[int, MLP]) with hard routing. |
-| `src/data/real_world.py` | ❌ | Real dataset loader — Phase 5+. |
+| `src/drift/error_detector.py` | ✅ | ADWIN change-point detection on 1D error stream (Phase 4 Day 1.5). |
+| `src/regime/adapter_library.py` | ✅ | Per-regime AdapterLibrary (nn.ModuleDict) with hard routing + per-adapter optimizer (Phase 4 Day 1.5). |
+| `src/data/real_world.py` | 🚧 Phase 5 | OpenML loader for Electricity (id=151) + Insects (incremental); A+ 3-segment slicer. |
 
 ### Experiment Progress
 
@@ -116,8 +116,16 @@ Orchestrator: `src/models/multi_timescale.py` `MultiTimescaleModel.step(X_ctx, y
     - `combined_drift`: **−0.47 pp sig negative (t=−5.62)** — reproducible regression
   - Diagnostic finding: gate's β ≈ 0 across all variants is RATIONAL — shared adapter has no transferable mid-timescale pattern across regimes. Fix requires per-regime isolation (Phase 4 Design A).
 - **Phase 4 Day 0.5** (Cheap diagnostic): ✅ Oracle context-reset (drift-aware) gives **+0.51pp sig** on regime_switching (paired t=+3.25), confirms context pollution accounts for ~1/3 of post-drift gap. Decision: Design A (per-regime adapter library) over Design E (context-reset only) because E would forfeit the rotating_boundary gain.
-- **Phase 4 Day 1.5** (architectural redesign): 🚧 In progress. Implementing `src/drift/error_detector.py` (ADWIN on 1D error stream) + `src/regime/adapter_library.py` (per-regime adapter dict + hard routing). Target: preserve rotating_boundary +1pp, flip combined_drift from −0.47pp to non-negative.
-- **Phase 5** (paper writing): ❌ Pending Day 1.5 results. Framing: "Per-regime adapter library on frozen tabular foundation models for concept drift", with Phase 3 negative findings as motivation for per-regime isolation.
+- **Phase 4 Day 1.5** (architectural redesign): ✅ Complete. Four-stage detector input ablation on synthetic data:
+  - **raw error**: 0/15 detector triggers → silenced (class-balanced regime mean ≈ 0)
+  - **|error|**: 0/15 triggers → TabPFN sliding-context absorbs continuous signal
+  - **0/1 indicator**: 12/15 triggers → routing activates but all 25/25 routes are `create` (cold-start drag)
+  - **warmstart (fit_threshold 0.5 + active-copy init)**: 13/13 routes still `create`; combined_drift worsens to −0.55 sig (warm-start is anti-pattern on abrupt boundary reversal)
+  - All four variants fail core acceptance (combined non-negative vs Phase 1: actuals −0.34 / −0.30 / −0.28 / −0.55 sig). rotating_boundary +1pp preserved across all four (+1.32 ~ +1.51 sig).
+  - Three design lessons → paper core contribution: (1) avoid foundation model self-adaptation loop, (2) signal-std must match fit threshold, (3) init strategy couples with drift type.
+- **Phase 4 Day 2** (option B confound-busting): 🚧 待启动. 5.5h. Run `(fit_threshold=0.5, random init)` to complete the 2×2 ablation grid (currently missing this cell). Resolves Ch7 confound for paper.
+- **Phase 5** (real-world validation): 🚧 待启动 (Day 2 之后). **Electricity** (OpenML 151, gradual / seasonal) + **Insects (incremental)** (regime drift). A+ subsampling protocol: 3 non-overlapping 5000-sample contiguous segments × 5 seeds × 3 phases (1/3/4 indicator) = 45 runs/dataset = 90 runs ≈ 45h CPU. Only Phase 4 indicator on real (raw/abs/warmstart skipped). NOT running OpenML-CC18 (static benchmark, drift-irrelevant). combined_drift has no canonical real-world analog — kept as synthetic-only stress test. Full plan in [phase5_plan.md](phase5_plan.md).
+- **Phase 6** (paper writing): ❌ Pending Phase 5. Two versions: 毕业论文 (含 Phase 2/2.5 appendix, 中文+英文摘要) + 投稿版 (workshop/short paper, 英文, ~8 章). Title drops "PFC", uses "Multi-Timescale / Hierarchical" ML terminology. Ch2.3 retains half-page biological motivation note explicitly stating frozen TabPFN cannot do weight-level consolidation. Negative-result methodology framing.
 
 ### Synthetic Datasets
 
@@ -133,12 +141,15 @@ All three generators produce `SyntheticDataset(X, y, regime_labels, drift_points
 
 ## Key Documents
 
-- `progress_report.md` — full experimental narrative (Phase 1 → Phase 4 Day 0.5)
+- `progress_report.md` — full experimental narrative (Phase 1 → Phase 4 Day 1.5 + Phase 5/6 plan stubs)
 - `phase4_plan.md` — Phase 4 plan (Cheap Diagnostic + Decision branch + Design A spec)
+- `phase5_plan.md` — **Phase 5 (real-world validation) + Phase 4 Day 2 cleanup + Phase 6 (paper) plan** ← 当前 active 计划
 - `implementation_plan_v2.md` — V2 design spec (current code follows this)
 - `idea_difference.md` — V1 (PDF) vs V2 design comparison
 - `claude-code-workflow-setup.md` — `.claude/` config blueprint
 - `results/oracle_summary.md` / `results/multiseed_summary.md` / `results/day05_decision.md` — Phase 4 Day 0.5 outputs
+- `results/phase4_final_verdict.md` — Phase 4 Day 1.5 四段终极对照表 + 论文章节大纲建议
+- `results/phase4_a_summary_{indicator,warmstart}.md` — Day 1.5 各轮详细 summary
 
 ## Project-Level Subagents
 
