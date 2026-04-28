@@ -75,8 +75,9 @@ def parse_args():
     # ── Phase 4 A 新增参数 ──────────────────────────────────────────────
     parser.add_argument("--max_adapters", type=int, default=8,
                         help="AdapterLibrary 容量上限")
-    parser.add_argument("--library_fit_threshold", type=float, default=0.05,
-                        help="route 时复用现有 adapter 的 MSE 上限")
+    parser.add_argument("--library_fit_threshold", type=float, default=0.5,
+                        help="route 时复用现有 adapter 的 MSE 上限（0.5 是 warmstart 默认；"
+                             "v1 indicator run 用 0.05 导致 25/25 全 create 0 reuse）")
     parser.add_argument("--detector_delta", type=float, default=0.002,
                         help="ADWIN 置信参数（小=保守）")
     parser.add_argument("--detector_min_subwindow", type=int, default=30,
@@ -341,6 +342,9 @@ def main():
         seed=np.array([args.seed]),
         abs_error_history=np.array(model.abs_error_history, dtype=np.float32),
         indicator_history=np.array(model.indicator_history, dtype=np.int8),
+        n_warmstart_inits=np.array([model.adapter_library.n_warmstart_inits]),
+        n_random_inits=np.array([model.adapter_library.n_random_inits]),
+        library_fit_threshold=np.array([args.library_fit_threshold]),
     )
     print(f"数值结果已保存至: {npz_path}")
 

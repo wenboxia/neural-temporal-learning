@@ -69,11 +69,11 @@ def build_base_cmd(config: str, dataset: str) -> list[str]:
 
 
 def out_tag(config: str, dataset: str, seed: int) -> str:
-    # Phase 4 A option-B 重跑：detector 输入改为 0/1 错误指示器。
-    # raw / abs run 已归档为 multiseed_phase4a_raw_* / multiseed_phase4a_abs_*；
-    # 新 indicator run 用 multiseed_phase4a_indicator_*。三种命名共存供 paper 三段对比。
+    # Phase 4 A 第四轮 (warmstart)：indicator detector + library_fit_threshold 0.05→0.5
+    # + AdapterLibrary 新建 adapter 时 warm-start 自当前 active 复制权重。
+    # 前三轮 (raw / abs / indicator) npz 全部保留作对照；新 run 落 multiseed_phase4a_warmstart_*。
     if config == "phase4a":
-        return f"multiseed_phase4a_indicator_{dataset}_seed{seed}"
+        return f"multiseed_phase4a_warmstart_{dataset}_seed{seed}"
     return f"multiseed_{config}_{dataset}_seed{seed}"
 
 
@@ -126,7 +126,7 @@ def read_phase4a_metrics(dataset: str, seed: int) -> dict | None:
 
 def append_phase4a_partial_row(rec: dict) -> None:
     """每个 phase4a 任务跑完，把这一行 append 到 partial md。"""
-    out_path = RESULTS_DIR / "multiseed_phase4a_indicator.partial.md"
+    out_path = RESULTS_DIR / "multiseed_phase4a_warmstart.partial.md"
     header = "| seed | dataset | overall_acc | post_drift_acc | n_routes | n_adapters | wall_time |\n"
     sep = "|---|---|---|---|---|---|---|\n"
     init = not out_path.exists()

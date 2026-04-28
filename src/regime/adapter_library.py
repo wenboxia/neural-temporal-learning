@@ -78,8 +78,10 @@ class AdapterLibrary(nn.Module):
         self.route_history: list = []  # list[(t, active_id)]，由调用方填 t
         self._next_id: int = 0
         self._active_id: int = -1
+        self.n_random_inits: int = 0     # 随机初始化的 adapter 计数（adapter 0 默认走这条）
+        self.n_warmstart_inits: int = 0  # warm-start 自当前 active 复制的 adapter 计数
 
-        # 默认创建 adapter 0 并 active
+        # 默认创建 adapter 0 并 active（此时 self.adapters 为空 → 走随机初始化分支）
         self._create_new_adapter()
 
     # ------------------------------------------------------------------
@@ -101,11 +103,39 @@ class AdapterLibrary(nn.Module):
         return mlp
 
     def _create_new_adapter(self) -> int:
-        """新建一个 adapter，返回其 id；自动设为 active。"""
+        """新建一个 adapter，返回其 id；自动设为 active。
+
+        策略：
+          - 第一次创建（init 时 self.adapters 为空）→ 随机初始化（cold-start adapter 0）
+          - 之后所有 create（routing 触发时）→ 从当前 active adapter 复制权重 (warm-start)
+            + 新建独立 Adam optimizer（state 自动重置）
+
+        warm-start 解 cold-start 失败模式：v1 indicator 实验中 25/25 routing 全是
+        新建空白 adapter，路由瞬间预测从训练好的 active 跳到随机初始化网络 →
+        短期 acc 下降抵消 routing 增益。warm-start 让新 adapter 从已学到的状态出发
+        继续在新 regime 上微调。
+        """
         new_id = self._next_id
         self._next_id += 1
-        mlp = self._make_mlp()
+        mlp = self._make_mlp()  # 默认 Kaiming 随机初始化
+
+        has_existing_active = (
+            len(self.adapters) > 0
+            and self._active_id >= 0
+            and str(self._active_id) in self.adapters
+        )
+        if has_existing_active:
+            # warm-start：从当前 active adapter 复制权重
+            src = self.adapters[str(self._active_id)]
+            with torch.no_grad():
+                for p_dst, p_src in zip(mlp.parameters(), src.parameters()):
+                    p_dst.copy_(p_src)
+            self.n_warmstart_inits += 1
+        else:
+            self.n_random_inits += 1
+
         self.adapters[str(new_id)] = mlp
+        # 新建独立 Adam → optimizer state（momentum、二阶矩）自动重置
         self._optimizers[new_id] = torch.optim.Adam(mlp.parameters(), lr=self.lr)
         self.usage[new_id] = 0
         self._active_id = new_id

@@ -168,6 +168,82 @@ class TestAdapterLibraryIsolation:
         )
 
 
+class TestAdapterLibraryWarmStart:
+
+    def test_first_adapter_is_random_init(self):
+        """init 时创建的 adapter 0 走随机初始化分支。"""
+        torch.manual_seed(20)
+        lib = AdapterLibrary(input_dim=4, hidden_dim=8)
+        assert lib.n_random_inits == 1
+        assert lib.n_warmstart_inits == 0
+
+    def test_subsequent_creates_warm_start_from_active(self):
+        """create-driven 新 adapter 应从当前 active 复制权重，不再随机。"""
+        torch.manual_seed(21)
+        rng = np.random.default_rng(21)
+        lib = AdapterLibrary(
+            input_dim=4, hidden_dim=8, fit_threshold=1e-9, max_adapters=4, lr=1e-2,
+        )
+        # 把 adapter 0 训练到一个非随机状态
+        X = rng.normal(size=(40, 4)).astype(np.float32)
+        e = rng.normal(size=40).astype(np.float32)
+        X_t = torch.tensor(X)
+        e_t = torch.tensor(e)
+        opt = lib.active_optimizer()
+        for _ in range(50):
+            pred = lib(X_t).view(-1)
+            loss = torch.nn.functional.mse_loss(pred, e_t)
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+        w0 = lib.adapters["0"][0].weight.detach().clone()
+
+        # 触发 routing 新建 → 应 warm-start 自 adapter 0
+        lib.route(X, e, t=100)
+        assert lib.active_id == 1
+        assert lib.n_warmstart_inits == 1, (
+            f"第二个 adapter 应 warm-start，n_warmstart_inits={lib.n_warmstart_inits}"
+        )
+        assert lib.n_random_inits == 1, (
+            f"random_inits 不应增加，仍应是 1（adapter 0 那次）"
+        )
+
+        w1_initial = lib.adapters["1"][0].weight.detach()
+        assert torch.allclose(w0, w1_initial), (
+            "warm-start 后 adapter 1 的初始权重应与 adapter 0 完全一致"
+        )
+
+    def test_warm_start_optimizer_state_is_fresh(self):
+        """新 adapter 的 Adam 应是新建的，state 重置（不继承 active 的 momentum）。"""
+        torch.manual_seed(22)
+        rng = np.random.default_rng(22)
+        lib = AdapterLibrary(
+            input_dim=4, hidden_dim=8, fit_threshold=1e-9, max_adapters=4, lr=1e-2,
+        )
+        X = rng.normal(size=(20, 4)).astype(np.float32)
+        e = rng.normal(size=20).astype(np.float32)
+        # 训练 adapter 0 让它积累 Adam state
+        opt0 = lib.active_optimizer()
+        for _ in range(20):
+            pred = lib(torch.tensor(X)).view(-1)
+            loss = torch.nn.functional.mse_loss(pred, torch.tensor(e))
+            opt0.zero_grad()
+            loss.backward()
+            opt0.step()
+        # adapter 0 state 应非空
+        state0 = list(opt0.state.values())
+        assert len(state0) > 0
+        assert "exp_avg" in state0[0]
+
+        # 触发 routing
+        lib.route(X, e, t=100)
+        opt1 = lib.active_optimizer()
+        # adapter 1 的 Adam state 应为空（还没 step 过）
+        assert len(list(opt1.state.values())) == 0, (
+            "warm-start 后新 adapter optimizer state 应为空（重置）"
+        )
+
+
 class TestAdapterLibraryDropIn:
 
     def test_drop_in_replacement_for_gated_ensemble_adapter(self):

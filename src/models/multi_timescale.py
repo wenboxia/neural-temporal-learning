@@ -90,7 +90,7 @@ class MultiTimescaleModel:
         # ── Phase 4 A 扩展（默认 False = 完全等价 Phase 3 v2+B+F）──
         use_adapter_library: bool = False,
         max_adapters: int = 8,
-        library_fit_threshold: float = 0.05,
+        library_fit_threshold: float = 0.5,
         detector_delta: float = 0.002,
         detector_min_subwindow: int = 30,
         detector_cooldown: int = 80,
