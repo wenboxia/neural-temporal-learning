@@ -478,11 +478,98 @@ phase4_plan 失败条件 = "rotating 失去 +1pp 赢点" → **未触发**（rot
 
 预计选项 A 单参数改动后重跑 5.5h，验证 detector 实际触发能否带动 combined_drift 翻转。
 
-### 数据 commits
+### 数据 commits（raw run）
 
 - Step 1-5（实施 + smoke）
 - Step 6（multi-seed 15 runs，全部 status=ok）
-- Step 7（[results/phase4_a_summary.md](results/phase4_a_summary.md) + 本段更新）
+- Step 7（[results/phase4_a_raw_summary.md](results/phase4_a_raw_summary.md)；原 `phase4_a_summary.md` 已重命名归档）
+
+---
+
+### Phase 4 A — Option A 重跑：detector 输入改 |error|（abs 实验，2026-04-28）
+
+**动机**：raw run detector 全程沉默 → 整段实验本质是 "Phase 3 减 consolidation"，Design A 的 routing 路径未真正测试。投入 5.5h 重跑只改两行：value_range 2.0 → 1.0，detector 输入 raw error → abs(error)。
+
+**结果**：detector **仍然 0 触发跨 15/15 runs**，与 raw 实验在 overall_acc 上无显著差异（三数据集 paired t |t| ∈ {0.25, 0.48, 0.29}, p ∈ {0.81, 0.66, 0.79}, 全 NS）。
+
+**根因诊断**（diagnostic 1-seed regime_switching seed=42 with detector_delta=0.05 + abs_error_history 落盘）：
+
+| 真实漂移点 | t=500 | t=1000 | t=1500 | t=2000 | t=2500 |
+|---|---|---|---|---|---|
+| segment |error| mean | 0.30 | 0.32 | 0.30 | 0.33 | 0.32 |
+| Δmean   | +0.018 | −0.017 | +0.026 | −0.005 | −0.035 |
+
+|error| 在 regime 间 mean shift 仅 ±0.005 ~ ±0.035，但 |error| 流自身 std = 0.24 → **信号弱 7~50 倍于噪声**。TabPFN 的 sliding-context in-context learning 在 regime 切换后快速调整 y_slow 使 |y_t − y_slow| 平均水平回归 ≈ 0.30，所以 |error| mean 跨 regime 几乎不变。**Option C（调 detector_delta）救不了** —— 信号本身没 mean shift。
+
+**结论**：raw / abs 两路 detector 输入都被 TabPFN 自适应消化，必须升级到不依赖连续误差信号的 detector 输入。
+
+数据归档：raw 实验 → `multiseed_phase4a_raw_*.npz/png` + `phase4_a_raw_summary.md`；abs 实验 → `multiseed_phase4a_abs_*.npz/png` + `multiseed_phase4a_abs.partial.md`。
+
+---
+
+### Phase 4 A — Option B 重跑：detector 输入改 0/1 错误指示器（indicator 实验，2026-04-28）
+
+**改动**：`detector.update(int((y_final ≥ 0.5) != y_t))`，value_range=1.0，detector_delta=0.002（回到 Step 1 sanity check 验证过的参数，无 ADWIN 调参混淆）。
+
+#### Detector 终于激活
+
+| 数据集 | 真实漂移点 | sum routes / 15 | avg routes / seed | recall |
+|---|---|---|---|---|
+| `regime_switching`  | 5 (循环)         | 7  | 1.4 | 28% |
+| `rotating_boundary` | 4 (渐进)         | 0  | 0.0 | 0%（设计精神，详下）|
+| `combined_drift`    | 1 (t=3000)       | 5  | 1.0 | 80% |
+
+**rotating_boundary 0 触发是设计精神而非 bug**：渐进漂移下错误率随时间缓慢上升，indicator 流没有阶跃式 mean shift，ADWIN 切点看不到清晰边界。这与 Design A 设计思想吻合 —— 渐进漂移上 routing 退化为"single adapter + per-step gate 训练"，与 Phase 3 渐进漂移上的赢点机制等价。
+
+#### 数值结果（n=5, paired t-test）
+
+vs Phase 1 baseline：
+
+| 数据集 | Δ (pp) | t | p | sig? | 验收线 | 验收 |
+|---|---|---|---|---|---|---|
+| `regime_switching`  | −0.66 | −2.17 | 0.0954 | NS | ≥ −1pp | ✓ 通过 |
+| `rotating_boundary` | **+1.51** | **+6.38** | **0.0031** | ✓ sig 正 | ≥ +0.5pp | ✓ **超额** |
+| `combined_drift`    | −0.28 | −4.12 | 0.0146 | ✓ sig 负 | ≥ −0.1pp | ✗ **未达** |
+
+vs Phase 3 v2+B+F：
+
+| 数据集 | Δ (pp) | t | p | sig? |
+|---|---|---|---|---|
+| `regime_switching`  | **−0.48** | −2.91 | 0.044 | ✓ sig 负 |
+| `rotating_boundary` | **+0.51** | +2.96 | 0.041 | ✓ sig 正 |
+| `combined_drift`    | **+0.20** | +3.46 | 0.026 | ✓ sig 正 |
+
+#### Verdict
+
+phase4_plan **核心成功条件** = "rotating 不丢 + combined 翻 non-negative"：
+- rotating: ✓ 保住，+1.51pp sig 超验收线
+- combined: vs Phase 3 翻正 +0.20pp sig，但 vs Phase 1 仍 sig 负 −0.28pp **未达 non-negative 线**
+
+**失败条件** = "rotating 失去 +1pp" → 未触发（rotating 反而 +0.51pp sig 优于 Phase 3）。
+
+**整体定性**：**Mixed bag with substance** — 不是空跑（前两次 raw/abs 是），detector 真在做事，但核心 combined-drift-vs-Phase-1 验收仍未达成。
+
+#### 失败模式诊断
+
+**全 25/25 routing 是 `create`，0 个 `reuse`** —— `library_fit_threshold=0.05` 对 evaluate_existing 输出的"现有 adapter 拟合 |error| 残差"判定太严，新 regime 数据从不被判定为"现有 adapter 已 fit"。每次 routing 都新建空白随机 adapter → 冷启动短期 acc 拖累 → regime_switching 上从 Phase 3 NS 跌到 sig 负向。
+
+#### 论文叙事三段式（raw → abs → indicator）
+
+| 阶段 | Detector 输入 | 触发情况 | 主要发现 |
+|---|---|---|---|
+| **raw** | `y_t − y_slow ∈ [−1,1]` | 0/15 | Class-balanced regime 内正反向误差抵消，raw error mean ≈ 0 → ADWIN 看不到 mean shift |
+| **abs** | `|error| ∈ [0,1]` | 0/15 | TabPFN sliding-context 自适应使 |error| mean ≈ 0.30 跨所有 regime，Δmean ±0.005~0.035 vs std 0.24 → 调 ADWIN 参数无法救 |
+| **indicator** | `int((y_final ≥ 0.5) != y_t)` | 12/15 | 错误率信号直接、阶跃明显（in-regime 0.17 → post-drift 0.37, Δmean ≈ 0.20）→ ADWIN 在 δ=0.002 稳定触发 |
+
+**共同结论**：在自适应 in-context learner（如 TabPFN）输出之上做漂移检测时，必须避开它的自适应回路 —— 连续误差信号都被 TabPFN 平滑掉，只有 hard 0/1 indicator 保留"是否预测对"的离散信号。
+
+#### Follow-up 选项（不在 Day 1.5 范围）
+
+1. 调宽 `library_fit_threshold`（0.05 → 0.2 或 0.5）让 reuse 发生
+2. 新 adapter 创建时用现有最佳 adapter warm-start（避免冷启动）
+3. 调 `consolidation_epochs`（10 → 50）让新 adapter 创建后立即更深训练
+
+详见 [results/phase4_a_summary_indicator.md](results/phase4_a_summary_indicator.md)。
 
 ---
 
