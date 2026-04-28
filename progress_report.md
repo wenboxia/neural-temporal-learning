@@ -573,6 +573,71 @@ phase4_plan **核心成功条件** = "rotating 不丢 + combined 翻 non-negativ
 
 ---
 
+### Phase 4 A — Warmstart 重跑（最后一轮，2026-04-28）
+
+**动机**：indicator run 25/25 routing 全 `create` / 0 `reuse` 是核心失败模式，新建空白 adapter 的 cold-start 拖累短期 acc。两个改动同时上：
+
+1. `library_fit_threshold` 默认 0.05 → 0.5（10× 放宽 reuse 判定）
+2. `AdapterLibrary._create_new_adapter`：non-init 时从当前 active 复制权重 (warm-start)，optimizer state 仍重置（新建 Adam 实例）。第一次创建（adapter 0）仍随机初始化以避免污染。
+
+#### 守门检查
+
+| 守门 | 期望 | 实际 | 通过？ |
+|---|---|---|---|
+| 1. n_routes > 0 | detector 仍触发 | regime 7 / rotating 1 / combined 5 跨 12/15 runs | ✓ 通过 |
+| 2. reuse 占比 > 0 | fit_threshold 0.5 让 reuse 路径激活 | **13/13 routing 仍全 `create`，0 reuse** | ✗ **失败** |
+
+#### 数值结果（n=5, paired t）
+
+vs Phase 1 baseline：
+
+| 数据集 | Δ (pp) | t | sig? | 验收 |
+|---|---|---|---|---|
+| `regime_switching`  | −0.29 | −1.49 | NS | ✓ |
+| `rotating_boundary` | **+1.32** | **+8.80** | ✓ sig | ✓ **超额** |
+| `combined_drift`    | **−0.55** | −6.37 | ✓ sig 负 | ✗ **未达**（最差）|
+
+vs Phase 3 三数据集**全 NS**（warm-start + threshold 抹平了 indicator vs P3 的三个 sig 差异，包括 combined +0.20pp 翻正）。
+
+vs indicator：regime +0.37 NS（cold-start 拖累减轻）/ rotating −0.19 NS / **combined −0.28 NS**（warm-start 在 abrupt boundary reversal 数据上是 anti-pattern：复制旧 adapter 权重 → 新 adapter 起步带反向 boundary 偏置 → 收敛更慢）。
+
+#### 失败模式诊断
+
+**fit_threshold 0.5 仍不够松**。evaluate_existing 计算 `MSE(adapter(X_recent), errors_recent)`，其中 `errors_recent` 是 raw error `y_t − y_slow` ∈ [−1, 1]，分布宽（typical |error| 0.3–0.8）→ MSE 自然 ~0.2-0.5 量级。fit_threshold=0.5 要求 adapter 几乎完美预测残差，noisy stochastic 信号上不现实。需要更软的 evaluation function（如 KL divergence on prediction distribution）—— 不在 Day 1.5 范围。
+
+#### 整体定性
+
+**Failure mode 2 with substance**：守门 2 失败 + combined 在四轮中最差。core success condition (combined flip non-negative vs P1) 在四个变体下**全部未达成**（−0.43 / −0.30 / −0.28 / −0.55 pp，全部 sig 负向）。
+
+详见 [results/phase4_a_summary_warmstart.md](results/phase4_a_summary_warmstart.md)。
+
+---
+
+### Phase 4 Day 1.5 — 四轮 final verdict（2026-04-28）
+
+四轮 Phase 4 A 实验完成，详细见 [results/phase4_final_verdict.md](results/phase4_final_verdict.md)。
+
+| 阶段 | Detector 输入 | Init 策略 | fit_threshold | Detector 触发 | regime | rotating | combined |
+|---|---|---|---|---|---|---|---|
+| Phase 1 baseline | — | — | — | — | 79.89 | 82.07 | 82.24 |
+| Phase 3 v2+B+F | — | — | — | — | NS | **+1.00 sig** | **−0.47 sig 负** |
+| **raw** | y_t−y_slow | random | 0.05 | 0/15 | −0.43 sig | **+1.36 sig** | −0.34 sig |
+| **abs** | |error| | random | 0.05 | 0/15 | −0.37 NS | **+1.45 sig** | −0.30 sig |
+| **indicator** | int(pred≠label) | random | 0.05 | 12/15 | −0.66 NS | **+1.51 sig** | −0.28 sig |
+| **warmstart** | int(pred≠label) | warm-start | 0.5 | 12/15 | −0.29 NS | **+1.32 sig** | **−0.55 sig** |
+
+**核心成功条件**（combined 翻 non-negative vs P1）= 四轮全失败。
+**rotating +1pp 赢点** = 四轮全保住（+1.32 ~ +1.51 sig）。
+**论文定位**：负面结果 methodology paper，核心 contribution 是"在 TabPFN-class 自适应 in-context learner 之上做 concept drift adaptation 的设计 trap 系统性 mapping"，三大 design lesson：
+
+1. **避开自适应回路**：连续误差信号（raw/abs）被 TabPFN sliding-context 平滑掉，必须用 hard discrete 信号（0/1 indicator）才能保留漂移信息
+2. **信号 std 量级匹配 fit_threshold**：MSE on raw error 残差与 noisy stochastic 信号 std 不匹配，任何"经验上合理"的 fit_threshold 都不够松
+3. **Init 策略与 drift type 耦合**：循环 regime 上 warm-start 微利，abrupt boundary reversal 上 warm-start 是 anti-pattern；single global init strategy 不存在
+
+Phase 5 论文章节大纲在 [phase4_final_verdict.md](results/phase4_final_verdict.md) §"论文章节大纲建议"。
+
+---
+
 ## 下一步：Phase 5 — 论文撰写
 
 待 Phase 4 Day 1.5 完成后启动。Title 候选：*Per-Regime Adapter Libraries for Concept Drift on Frozen Tabular Foundation Models*。详见 [phase4_plan.md](phase4_plan.md) 的"论文 framing"段。
