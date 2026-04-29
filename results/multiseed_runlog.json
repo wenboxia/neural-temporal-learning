@@ -2,136 +2,136 @@
   {
     "config": "phase4a",
     "dataset": "regime_switching",
-    "seed": 42,
+    "seed": 123,
     "status": "ok",
-    "elapsed_sec": 2138.586263895035,
-    "overall_acc": 0.7875,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed42.log"
+    "elapsed_sec": 2364.430571079254,
+    "overall_acc": 0.795,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_regime_switching_seed123.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
-    "seed": 123,
+    "seed": 42,
     "status": "ok",
-    "elapsed_sec": 2172.996397972107,
-    "overall_acc": 0.7896428571428571,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed123.log"
+    "elapsed_sec": 2619.023566007614,
+    "overall_acc": 0.7839285714285714,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_regime_switching_seed42.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 456,
     "status": "ok",
-    "elapsed_sec": 2070.8224687576294,
-    "overall_acc": 0.8046428571428571,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed456.log"
+    "elapsed_sec": 2977.5809111595154,
+    "overall_acc": 0.8057142857142857,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_regime_switching_seed456.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 789,
     "status": "ok",
-    "elapsed_sec": 2083.319725036621,
-    "overall_acc": 0.8075,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed789.log"
+    "elapsed_sec": 3087.8954389095306,
+    "overall_acc": 0.7975,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_regime_switching_seed789.log"
   },
   {
     "config": "phase4a",
     "dataset": "regime_switching",
     "seed": 1024,
     "status": "ok",
-    "elapsed_sec": 1798.5915400981903,
-    "overall_acc": 0.7907142857142857,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_regime_switching_seed1024.log"
-  },
-  {
-    "config": "phase4a",
-    "dataset": "rotating_boundary",
-    "seed": 123,
-    "status": "ok",
-    "elapsed_sec": 1275.8268909454346,
-    "overall_acc": 0.8289285714285715,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed123.log"
+    "elapsed_sec": 1841.0873019695282,
+    "overall_acc": 0.7978571428571428,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_regime_switching_seed1024.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 42,
     "status": "ok",
-    "elapsed_sec": 1293.625343322754,
-    "overall_acc": 0.8439285714285715,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed42.log"
+    "elapsed_sec": 1340.3444559574127,
+    "overall_acc": 0.8417857142857142,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_rotating_boundary_seed42.log"
+  },
+  {
+    "config": "phase4a",
+    "dataset": "rotating_boundary",
+    "seed": 123,
+    "status": "ok",
+    "elapsed_sec": 1383.7733538150787,
+    "overall_acc": 0.8335714285714285,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_rotating_boundary_seed123.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 456,
     "status": "ok",
-    "elapsed_sec": 1307.583990097046,
-    "overall_acc": 0.8296428571428571,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed456.log"
+    "elapsed_sec": 1335.8350522518158,
+    "overall_acc": 0.8396428571428571,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_rotating_boundary_seed456.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 789,
     "status": "ok",
-    "elapsed_sec": 1303.7688481807709,
-    "overall_acc": 0.8282142857142857,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed789.log"
+    "elapsed_sec": 1320.1673760414124,
+    "overall_acc": 0.8278571428571428,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_rotating_boundary_seed789.log"
   },
   {
     "config": "phase4a",
     "dataset": "rotating_boundary",
     "seed": 1024,
     "status": "ok",
-    "elapsed_sec": 1174.6671288013458,
-    "overall_acc": 0.8385714285714285,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_rotating_boundary_seed1024.log"
-  },
-  {
-    "config": "phase4a",
-    "dataset": "combined_drift",
-    "seed": 42,
-    "status": "ok",
-    "elapsed_sec": 3422.7062661647797,
-    "overall_acc": 0.8170833333333334,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed42.log"
+    "elapsed_sec": 1205.8276216983795,
+    "overall_acc": 0.8364285714285714,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_rotating_boundary_seed1024.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 123,
     "status": "ok",
-    "elapsed_sec": 3441.923648118973,
-    "overall_acc": 0.8152083333333333,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed123.log"
-  },
-  {
-    "config": "phase4a",
-    "dataset": "combined_drift",
-    "seed": 789,
-    "status": "ok",
-    "elapsed_sec": 3430.8929657936096,
+    "elapsed_sec": 3621.771148920059,
     "overall_acc": 0.8179166666666666,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed789.log"
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_combined_drift_seed123.log"
+  },
+  {
+    "config": "phase4a",
+    "dataset": "combined_drift",
+    "seed": 42,
+    "status": "ok",
+    "elapsed_sec": 3676.695823907852,
+    "overall_acc": 0.8185416666666666,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_combined_drift_seed42.log"
+  },
+  {
+    "config": "phase4a",
+    "dataset": "combined_drift",
+    "seed": 789,
+    "status": "ok",
+    "elapsed_sec": 3632.021247148514,
+    "overall_acc": 0.8235416666666666,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_combined_drift_seed789.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 456,
     "status": "ok",
-    "elapsed_sec": 3549.456362247467,
-    "overall_acc": 0.8139583333333333,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed456.log"
+    "elapsed_sec": 3794.2849230766296,
+    "overall_acc": 0.8058333333333333,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_combined_drift_seed456.log"
   },
   {
     "config": "phase4a",
     "dataset": "combined_drift",
     "seed": 1024,
     "status": "ok",
-    "elapsed_sec": 2843.368928194046,
-    "overall_acc": 0.8204166666666667,
-    "log": "logs/multiseed/multiseed_phase4a_warmstart_combined_drift_seed1024.log"
+    "elapsed_sec": 2971.904921770096,
+    "overall_acc": 0.8229166666666666,
+    "log": "logs/multiseed/multiseed_phase4a_fit05random_combined_drift_seed1024.log"
   }
 ]
