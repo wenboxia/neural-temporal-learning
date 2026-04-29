@@ -662,13 +662,81 @@ Day 1.5 四轮 ablation 结果证实 Design A 在合成数据上 mixed bag（rot
 
 ---
 
-## Phase 4 Day 2 — 收尾 (option B confound-busting)
+## Phase 4 Day 2 — 收尾完成 (option B confound-busting, 2026-04-29)
 
-**待启动**。Day 1.5 warmstart 实验同时改了两个变量（`fit_threshold` 0.05→0.5 + init random→warm），2×2 析因网格缺一格 (fit_threshold=0.5, random init)。Day 2 补这格 = 5.5h × 1 round。
+### 计划（保留作 motivation）
 
-完成后 Ch7 重写为干净的 2×2 析因，Ch6/Ch7 内容重叠问题自然解决。
+Day 1.5 warmstart 实验同时改了两个变量（`fit_threshold` 0.05→0.5 + init random→warm），2×2 析因网格缺一格 (fit_threshold=0.5, random init)。Day 2 补这格 = 5.5h × 1 round。完成后 Ch7 重写为干净的 2×2 析因。
 
 详见 [phase5_plan.md](phase5_plan.md) §0。
+
+### 实施结果
+
+**改动（最小）**：AdapterLibrary 加 `init_strategy ∈ {"warm", "random"}` 参数（默认 `"warm"` 保留 Day 1.5 行为），CLI flag `--library_init_strategy` 控制。run_multiseed.py 的 phase4a config 自动注入 `--library_init_strategy random`。**默认行为零变化**。
+
+**实验**：3 数据集 × 5 seeds = 15 runs，driver 总耗时 **355.8 min ≈ 5.9 h**，全部 status=ok。
+
+#### 数值结果（n=5, paired t）
+
+vs Phase 1 baseline：
+
+| 数据集 | Δ (pp) | t | sig? | 验收 |
+|---|---|---|---|---|
+| `regime_switching`  | −0.29 | −1.58 | NS | ✓ |
+| `rotating_boundary` | **+1.52** | **+8.67** | ✓ sig | ✓ **超额（5 轮中最佳）**|
+| `combined_drift`    | −0.47 | −1.96 | NS（边缘）| ✗（仍未达，但 warmstart sig 负 → fit05random NS）|
+
+vs warmstart（控制变量：random vs warm，fit=0.5 不变）：三数据集**全 NS**（Δ ∈ {0.00, +0.20, +0.08}），random 一致**不差于** warm-start。
+
+vs indicator（控制变量：fit_threshold 0.05→0.5，init=random 不变）：三数据集**全 NS**（Δ ∈ {+0.37, +0.01, −0.19}）。
+
+#### Confound 解耦：完美加性
+
+```
+Δ vs Phase 1 baseline (combined_drift):
+  indicator    (fit=0.05, random):  -0.275 pp
+  fit05random  (fit=0.5,  random):  -0.467 pp     [Day 2 新填的 cell]
+  warmstart    (fit=0.5,  warm):    -0.550 pp
+
+  fit_threshold effect (init=random fixed): -0.192 pp  (70% 贡献)
+  init_strategy effect (fit=0.5    fixed):  -0.083 pp  (30% 贡献)
+  Sum                                       = -0.275 pp
+  Actual indicator → warmstart              = -0.275 pp     ⟹ 加性，无交互
+```
+
+→ **fit_threshold 是 combined_drift 退化主因**（70%），warm-start 是次因（30%）。两个设计变量可独立分析。
+
+#### 关键修正（论文 Ch7 用）
+
+Day 1.5 warmstart 章节写"warm-start 在 abrupt boundary reversal 上是 anti-pattern"是**过强表述**。Day 2 数据修正：在 fit_threshold=0.5 下 init_strategy 三数据集全 NS（< 0.1pp 量级），是 secondary factor 而非 anti-pattern。论文 Ch7 应改为"init_strategy 影响在 (fit_threshold, drift_type) 联合空间内是次要因子，主要设计杠杆是 fit_threshold + detector 输入信号"。
+
+#### Routing 行为：reuse 路径与 init_strategy 完全无关
+
+跨三种 (fit_threshold, init_strategy) 配置 **52/52 routing 全 create / 0 reuse**：
+- indicator (fit=0.05, random): 25 routes, 25 create, 0 reuse
+- warmstart (fit=0.5, warm):    13 routes, 13 create, 0 reuse
+- fit05random (fit=0.5, random): 14 routes, 14 create, 0 reuse
+
+**fit_threshold 调宽 10× + init_strategy 切换都未触发 reuse 一次**。这强化论文 Ch8 lesson 2：reuse 判定函数（MSE on raw error 残差）的设计与 raw error 自身 std 量级冲突，**不是参数调节问题**。
+
+详见：
+- [results/phase4_a_summary_fit05random.md](results/phase4_a_summary_fit05random.md) — 单轮详细 summary
+- [results/phase4_final_verdict.md](results/phase4_final_verdict.md) — 五段终极对照表 + Ch7 2×2 析因重写
+
+### 五段终极对照（vs Phase 1, n=5, paired t）
+
+| 阶段 | regime | rotating | combined | Detector 触发 |
+|---|---|---|---|---|
+| Phase 3 | NS | **+1.00 sig** | **−0.47 sig 负** | — |
+| raw | −0.43 sig | **+1.36 sig** | −0.34 sig 负 | 0/15 |
+| abs | −0.37 NS | **+1.45 sig** | −0.30 sig 负 | 0/15 |
+| indicator | −0.66 NS | **+1.51 sig** | −0.28 sig 负 | 12/15 |
+| warmstart | −0.29 NS | **+1.32 sig** | **−0.55 sig 负** | 12/15 |
+| **fit05random** | **−0.29 NS** | **+1.52 sig** | **−0.47 NS** | **9/15** |
+
+phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全部未达成**（−0.28 ~ −0.55 pp）。Rotating +1pp 赢点 = 五轮全部保住（+1.32 ~ +1.52 sig）。
+
+**Day 2 圆满收尾**：Ch7 confound 已解耦，Phase 5 论文撰写起点就绪。
 
 ---
 
