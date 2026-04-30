@@ -27,6 +27,7 @@ matplotlib.use("Agg")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.data.real_world import load_real_world
 from src.data.synthetic import make_dataset
 from src.data.temporal_loader import TemporalWindowLoader
 from src.models.multi_timescale import MultiTimescaleModel
@@ -41,8 +42,23 @@ def parse_args():
     # ── 基础参数（对齐 run_phase2.py）────────────────────────────────────
     parser.add_argument(
         "--dataset", type=str, default="regime_switching",
-        choices=["rotating_boundary", "regime_switching", "combined_drift"],
-        help="合成数据集类型",
+        choices=["rotating_boundary", "regime_switching", "combined_drift",
+                 "electricity", "insects"],
+        help="数据集名称（合成 3 个 + 真实 2 个）",
+    )
+    parser.add_argument(
+        "--dataset_source", type=str, default="synthetic",
+        choices=["synthetic", "real"],
+        help="数据来源：synthetic（默认，向后兼容）或 real（Phase 5）",
+    )
+    parser.add_argument(
+        "--segment_id", type=str, default="start",
+        choices=["start", "middle", "end"],
+        help="real 数据集的 contiguous segment 选择（仅 dataset_source=real 时生效）",
+    )
+    parser.add_argument(
+        "--segment_size", type=int, default=5000,
+        help="real 数据集的 segment 大小（默认 5000，A+ 协议）",
     )
     parser.add_argument("--n_samples", type=int, default=3000,
                         help="生成序列总长度")
@@ -100,7 +116,7 @@ def main():
     os.makedirs(args.results_dir, exist_ok=True)
 
     # rotating_boundary 必须用 n_features=2（与 run_phase2 保持一致）
-    if args.dataset == "rotating_boundary" and args.n_features == 10:
+    if args.dataset_source == "synthetic" and args.dataset == "rotating_boundary" and args.n_features == 10:
         args.n_features = 2
 
     print(f"\n{'='*60}")
@@ -116,18 +132,25 @@ def main():
           f"consolidation_cooldown: {args.consolidation_cooldown}")
     print(f"{'='*60}\n")
 
-    # ── 生成数据 ──────────────────────────────────────────────────────────
-    kwargs = {
-        "n_samples": args.n_samples,
-        "random_seed": args.seed,
-        "n_features": args.n_features,
-    }
-    if args.dataset == "rotating_boundary":
-        kwargs["drift_speed"] = args.drift_speed
-    elif args.dataset == "regime_switching":
-        kwargs["regime_length"] = args.regime_length
-        kwargs["n_regimes"] = args.n_regimes
-    dataset = make_dataset(args.dataset, **kwargs)
+    # ── 生成 / 加载数据 ──────────────────────────────────────────────────
+    if args.dataset_source == "real":
+        print(f"加载真实数据集 {args.dataset} segment={args.segment_id}...")
+        dataset = load_real_world(
+            args.dataset, segment_id=args.segment_id, size=args.segment_size
+        )
+        args.n_features = dataset.X.shape[1]
+    else:
+        kwargs = {
+            "n_samples": args.n_samples,
+            "random_seed": args.seed,
+            "n_features": args.n_features,
+        }
+        if args.dataset == "rotating_boundary":
+            kwargs["drift_speed"] = args.drift_speed
+        elif args.dataset == "regime_switching":
+            kwargs["regime_length"] = args.regime_length
+            kwargs["n_regimes"] = args.n_regimes
+        dataset = make_dataset(args.dataset, **kwargs)
     print(f"漂移点 ({len(dataset.drift_points)} 个): {dataset.drift_points}")
 
     loader = TemporalWindowLoader(

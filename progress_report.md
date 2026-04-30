@@ -742,18 +742,43 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 
 ## Phase 5 — Real-World Validation
 
-**待启动**（Day 2 完成后）。导师要求最终发现必须真实数据验证。
-
 **锁定决策**：
-- 数据集 = **Electricity** (OpenML 151) + **Insects (incremental)**（gradual + regime 双覆盖）
+- 数据集 = **Electricity** (OpenML 151) + **Insects abrupt_balanced** (USP DS via Google Drive；6-class binarized as sex-pair `{2,4,11}→0` vs `{3,5,12}→1`，详见 `phase5_real_summary_electricity.md` Limitations)
 - combined_drift **无真实 analog**，仅作合成 stress test
 - Subsampling = **A+（3 contiguous 5000-sample 段 × 5 seeds × 3 phases = 45 runs/数据集）**
-- 真实数据**只跑 Phase 4 indicator**，不跑 raw/abs/warmstart（Day 1.5 已证 indicator 是唯一激活 detector 的 input）
+- 真实数据**只跑 Phase 4 indicator**，不跑 raw/abs/warmstart
 - **不跑 OpenML-CC18**（静态 benchmark）
 
-总实验量 **2 datasets × 45 runs = 90 runs ≈ 45h CPU**，分 2-3 日。
+总实验量 **2 datasets × 45 runs = 90 runs**，分 Stage A (Electricity) / Stage B (Insects) 串行启动。
 
-完整 plan 见 [phase5_plan.md](phase5_plan.md)。
+### Phase 5 Stage A — Electricity 完成（2026-04-30）
+
+45 runs（3 phases × 3 segments × 5 seeds），1448 min ≈ 24.1h wall (n_parallel=2)，全部 `[ok]`。完整数字 + paired t-test + F4 复现状态 + class imbalance 检查见 [phase5_real_summary_electricity.md](results/phase5_real_summary_electricity.md)。
+
+**关键结果（Stage A 部分，待 Stage B 合并整体结论）**：
+
+| Comparison (n=15 paired) | Δ (pp) | t | p | sig? |
+|---|---|---|---|---|
+| phase3 vs phase1  | −0.124 | −2.51 | 0.0247 | **sig 负** |
+| phase4a vs phase1 | −0.064 | −1.49 | 0.1574 | NS |
+| phase4a vs phase3 | +0.060 | +1.03 | 0.3221 | NS |
+
+**Phase 4a routing diagnostics**（15 runs）：
+- detector events: **1/15** (vs synthetic regime 12/15, 同向 synthetic rotating 0/15) — gradual drift 上 indicator 几乎不触发，drift-type-conditional 设计精神匹配
+- routing actions: 1/1 全 `create` (0 reuse) — **F4 reuse 失活在真实数据上完全复现**
+- adapter count: 14× n_adapters=1 / 1× n_adapters=2
+
+**复现状态**（Stage A 部分）：
+- F3 (indicator 触发): **gradual 漂移上沉默** — 与合成 rotating 同向 ✓
+- F4 (reuse 不激活): **1/1 全 create** — 完全复现 ✓
+- Phase 3 vs P1 sig 负 (combined_drift 同向): **−0.124 sig** — 量级小一个数量级但定性同向 ✓
+- rotating +1pp 改善: **−0.064 NS 未复现** — Electricity 上 phase4a 没拿到合成 rotating 的 +1.5pp 改善
+
+**Segment 效应**：start (96.3%) ≈ end (94.8%) > middle (93.1%) — Electricity 时序中段（约 sample 22.5k–27.5k）显著难，与文献中"价格波动随时间集中"吻合。
+
+**End segment class imbalance**：min/max=0.85（更平衡），未触发"imbalanced metric 失效"风险，y bincount 三段稳定。
+
+完整 plan 见 [phase5_plan.md](phase5_plan.md)。Stage B Insects 待启动。
 
 ---
 

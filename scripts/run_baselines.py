@@ -27,6 +27,7 @@ matplotlib.use("Agg")
 # 将项目根目录加入 path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.data.real_world import load_real_world
 from src.data.synthetic import make_dataset
 from src.data.temporal_loader import CompositeWindowLoader, TemporalWindowLoader
 from src.models.slow_prior import SlowPrior
@@ -39,8 +40,23 @@ def parse_args():
         "--dataset",
         type=str,
         default="regime_switching",
-        choices=["rotating_boundary", "regime_switching", "combined_drift"],
-        help="合成数据集名称",
+        choices=["rotating_boundary", "regime_switching", "combined_drift",
+                 "electricity", "insects"],
+        help="数据集名称（合成 3 个 + 真实 2 个）",
+    )
+    parser.add_argument(
+        "--dataset_source", type=str, default="synthetic",
+        choices=["synthetic", "real"],
+        help="数据来源：synthetic（默认，向后兼容）或 real（Phase 5）",
+    )
+    parser.add_argument(
+        "--segment_id", type=str, default="start",
+        choices=["start", "middle", "end"],
+        help="real 数据集的 contiguous segment 选择（仅 dataset_source=real 时生效）",
+    )
+    parser.add_argument(
+        "--segment_size", type=int, default=5000,
+        help="real 数据集的 segment 大小（默认 5000，A+ 协议）",
     )
     parser.add_argument("--n_samples", type=int, default=5000, help="样本总数")
     parser.add_argument("--n_features", type=int, default=10, help="特征维度（rotating_boundary 建议用 2）")
@@ -73,15 +89,22 @@ def run_tabpfn_baseline(args):
     print(f"TabPFN n_estimators: {args.n_estimators}")
     print(f"{'='*60}\n")
 
-    # 1. 生成数据
-    print("正在生成合成数据...")
-    kwargs = {"n_samples": args.n_samples, "random_seed": args.seed, "n_features": args.n_features}
-    if args.dataset == "rotating_boundary":
-        kwargs["drift_speed"] = args.drift_speed
-    elif args.dataset == "regime_switching":
-        kwargs["regime_length"] = args.regime_length
-        kwargs["n_regimes"] = args.n_regimes
-    dataset = make_dataset(args.dataset, **kwargs)
+    # 1. 生成 / 加载数据
+    if args.dataset_source == "real":
+        print(f"加载真实数据集 {args.dataset} segment={args.segment_id}...")
+        dataset = load_real_world(
+            args.dataset, segment_id=args.segment_id, size=args.segment_size
+        )
+        args.n_features = dataset.X.shape[1]
+    else:
+        print("正在生成合成数据...")
+        kwargs = {"n_samples": args.n_samples, "random_seed": args.seed, "n_features": args.n_features}
+        if args.dataset == "rotating_boundary":
+            kwargs["drift_speed"] = args.drift_speed
+        elif args.dataset == "regime_switching":
+            kwargs["regime_length"] = args.regime_length
+            kwargs["n_regimes"] = args.n_regimes
+        dataset = make_dataset(args.dataset, **kwargs)
 
     print(f"  总样本数: {len(dataset.X)}")
     print(f"  特征维度: {dataset.X.shape[1]}")
@@ -270,7 +293,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     # rotating_boundary 默认用 2D 特征（方便可视化决策边界旋转）
-    if args.dataset == "rotating_boundary" and args.n_features == 10:
+    if args.dataset_source == "synthetic" and args.dataset == "rotating_boundary" and args.n_features == 10:
         print("提示: rotating_boundary 自动使用 n_features=2 以便可视化，如需其他维度请显式指定 --n_features")
         args.n_features = 2
 

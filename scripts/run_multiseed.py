@@ -34,11 +34,16 @@ LOGS_DIR = ROOT / "logs"
 
 SEEDS = [42, 123, 456, 789, 1024]
 DATASETS = ["regime_switching", "rotating_boundary", "combined_drift"]
+REAL_DATASETS = ["electricity", "insects"]
+SEGMENTS = ["start", "middle", "end"]
 CONFIGS = ["phase1", "phase2", "phase3", "phase4a"]
 
-# 各 (config, dataset) 的 base 命令（不含 --seed / --out_tag）
-def build_base_cmd(config: str, dataset: str) -> list[str]:
-    """返回该 (config, dataset) 的命令模板，调用方再加 --seed 和 --out_tag"""
+# 各 (config, dataset) 的 base 命令（不含 --seed / --out_tag / segment）
+def build_base_cmd(
+    config: str, dataset: str, dataset_source: str = "synthetic",
+    segment_id: str = "start", segment_size: int = 5000,
+) -> list[str]:
+    """返回该 (config, dataset) 的命令模板，调用方再加 --seed / --out_tag / 真实数据 flags。"""
     if config == "phase1":
         script = "scripts/run_baselines.py"
     elif config == "phase2":
@@ -52,49 +57,71 @@ def build_base_cmd(config: str, dataset: str) -> list[str]:
 
     cmd = [sys.executable, script, "--dataset", dataset]
 
-    if dataset == "rotating_boundary":
-        # run_baselines.py 自动设 n_features=2，phase2/3 需显式指定
-        if config != "phase1":
-            cmd += ["--n_features", "2"]
-    elif dataset == "combined_drift":
-        cmd += ["--n_samples", "5000"]
-    elif dataset == "regime_switching":
-        # 默认 n_samples=5000 for phase1, 3000 for phase2/3 - 统一到 3000 与 plan 对齐
-        if config == "phase1":
-            cmd += ["--n_samples", "3000"]
+    if dataset_source == "real":
+        if config == "phase2":
+            raise NotImplementedError("phase2 not plumbed for real data (Phase 5 skips it)")
+        cmd += [
+            "--dataset_source", "real",
+            "--segment_id", segment_id,
+            "--segment_size", str(segment_size),
+        ]
+    else:
+        if dataset == "rotating_boundary":
+            if config != "phase1":
+                cmd += ["--n_features", "2"]
+        elif dataset == "combined_drift":
+            cmd += ["--n_samples", "5000"]
+        elif dataset == "regime_switching":
+            if config == "phase1":
+                cmd += ["--n_samples", "3000"]
 
-    # context_size 统一为 200（与 0a / Phase 2 / Phase 3 现有实验对齐）
+    # context_size 统一为 200（合成实验既定，real 数据沿用同值）
     cmd += ["--context_size", "200"]
     return cmd
 
 
-def out_tag(config: str, dataset: str, seed: int) -> str:
-    # Phase 4 A 第五轮 (Day 2 confound-busting fit05random)：
-    # indicator detector + library_fit_threshold=0.5 + random init（不 warm-start）。
-    # 与 warmstart (fit=0.5, warm) 配对完成 2×2 析因网格的最后一格。
-    # 前四轮 npz 全部保留作对照；新 run 落 multiseed_phase4a_fit05random_*。
+def out_tag(
+    config: str, dataset: str, seed: int,
+    dataset_source: str = "synthetic", segment_id: str = "start",
+) -> str:
+    if dataset_source == "real":
+        # Phase 5: real data tag 含 segment_id 区分 3 段
+        return f"multiseed_{config}_real_{dataset}_{segment_id}_seed{seed}"
+    # 合成 phase4a 第五轮 (Day 2 fit05random)：indicator + fit=0.5 + random init
     if config == "phase4a":
         return f"multiseed_phase4a_fit05random_{dataset}_seed{seed}"
     return f"multiseed_{config}_{dataset}_seed{seed}"
 
 
-def npz_path(config: str, dataset: str, seed: int) -> Path:
-    return RESULTS_DIR / f"{out_tag(config, dataset, seed)}.npz"
+def npz_path(
+    config: str, dataset: str, seed: int,
+    dataset_source: str = "synthetic", segment_id: str = "start",
+) -> Path:
+    return RESULTS_DIR / f"{out_tag(config, dataset, seed, dataset_source, segment_id)}.npz"
 
 
-def build_full_cmd(config: str, dataset: str, seed: int) -> list[str]:
-    cmd = build_base_cmd(config, dataset)
-    cmd += ["--seed", str(seed), "--out_tag", out_tag(config, dataset, seed)]
-    # Day 2 confound-busting：phase4a 通过 driver 跑时强制 random init
-    # （脚本默认 init_strategy=warm，本轮要 fit05random）
+def build_full_cmd(
+    config: str, dataset: str, seed: int,
+    dataset_source: str = "synthetic", segment_id: str = "start",
+    segment_size: int = 5000,
+) -> list[str]:
+    cmd = build_base_cmd(config, dataset, dataset_source, segment_id, segment_size)
+    cmd += [
+        "--seed", str(seed),
+        "--out_tag", out_tag(config, dataset, seed, dataset_source, segment_id),
+    ]
+    # phase4a：合成 Day 2 / 真实 Phase 5 都用 indicator + random init（Phase 4 final）
     if config == "phase4a":
         cmd += ["--library_init_strategy", "random"]
     return cmd
 
 
-def read_overall_acc(config: str, dataset: str, seed: int) -> float | None:
+def read_overall_acc(
+    config: str, dataset: str, seed: int,
+    dataset_source: str = "synthetic", segment_id: str = "start",
+) -> float | None:
     """从 npz 中读取 overall_acc。Phase 2 取 KNN 列。"""
-    path = npz_path(config, dataset, seed)
+    path = npz_path(config, dataset, seed, dataset_source, segment_id)
     if not path.exists():
         return None
     data = np.load(path, allow_pickle=False)
@@ -153,13 +180,19 @@ def append_phase4a_partial_row(rec: dict) -> None:
         )
 
 
-def run_one(task: tuple[str, str, int], log_dir: Path) -> dict:
-    """跑一个 (config, dataset, seed)，返回 dict 含 status/elapsed/overall_acc。"""
-    config, dataset, seed = task
-    log_path = log_dir / f"{out_tag(config, dataset, seed)}.log"
+def run_one(task: tuple, log_dir: Path) -> dict:
+    """跑一个 task；synthetic = (config, dataset, seed)，real = (config, dataset, seed, segment_id)。"""
+    if len(task) == 4:
+        config, dataset, seed, segment_id = task
+        dataset_source = "real"
+    else:
+        config, dataset, seed = task
+        dataset_source = "synthetic"
+        segment_id = "start"
+    log_path = log_dir / f"{out_tag(config, dataset, seed, dataset_source, segment_id)}.log"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = build_full_cmd(config, dataset, seed)
+    cmd = build_full_cmd(config, dataset, seed, dataset_source, segment_id)
     t0 = time.time()
     try:
         with open(log_path, "w") as fh:
@@ -170,55 +203,83 @@ def run_one(task: tuple[str, str, int], log_dir: Path) -> dict:
         elapsed = time.time() - t0
         status = f"exc:{type(e).__name__}"
 
-    acc = read_overall_acc(config, dataset, seed)
+    acc = read_overall_acc(config, dataset, seed, dataset_source, segment_id)
     return {
         "config": config, "dataset": dataset, "seed": seed,
+        "dataset_source": dataset_source, "segment_id": segment_id,
         "status": status, "elapsed_sec": elapsed, "overall_acc": acc,
         "log": str(log_path.relative_to(ROOT)),
     }
 
 
-def write_partial_summary():
-    """根据 results/ 下现存 multiseed_*.npz 写 partial summary 表格。"""
-    rows = []
-    for config in CONFIGS:
-        for dataset in DATASETS:
-            accs = []
-            for s in SEEDS:
-                a = read_overall_acc(config, dataset, s)
-                if a is not None:
-                    accs.append(a)
-            if accs:
-                arr = np.array(accs)
-                rows.append({
-                    "config": config, "dataset": dataset,
-                    "n": len(accs), "mean": arr.mean(), "std": arr.std(ddof=1) if len(accs) > 1 else 0.0,
-                    "values": accs,
-                })
+def write_partial_summary(dataset_source: str = "synthetic", partial_tag: str = ""):
+    """根据 results/ 下现存 multiseed_*.npz 写 partial summary 表格。
 
-    out_path = RESULTS_DIR / "multiseed_summary.partial.md"
+    partial_tag: 文件名后缀（例如 "_electricity"），便于 Stage A/B 分开追踪。
+    """
+    rows = []
+    if dataset_source == "real":
+        ds_pool, seg_pool = REAL_DATASETS, SEGMENTS
+        out_name = f"multiseed_phase5{partial_tag}.partial.md"
+    else:
+        ds_pool, seg_pool = DATASETS, ["start"]  # synthetic 占位
+        out_name = "multiseed_summary.partial.md"
+
+    for config in CONFIGS:
+        for dataset in ds_pool:
+            for seg in seg_pool:
+                accs = []
+                for s in SEEDS:
+                    a = read_overall_acc(config, dataset, s, dataset_source, seg)
+                    if a is not None:
+                        accs.append(a)
+                if accs:
+                    arr = np.array(accs)
+                    rows.append({
+                        "config": config, "dataset": dataset, "segment": seg,
+                        "n": len(accs), "mean": arr.mean(),
+                        "std": arr.std(ddof=1) if len(accs) > 1 else 0.0,
+                    })
+
+    out_path = RESULTS_DIR / out_name
     with open(out_path, "w") as fh:
-        fh.write("# Multi-seed partial summary (live)\n\n")
+        fh.write(f"# Multi-seed partial summary ({dataset_source}) (live)\n\n")
         fh.write(f"_Last updated: {time.strftime('%Y-%m-%d %H:%M:%S')}_\n\n")
-        fh.write("| Config | Dataset | n_seeds | overall_acc mean ± std |\n")
-        fh.write("|---|---|---|---|\n")
-        for r in rows:
-            fh.write(f"| {r['config']} | {r['dataset']} | {r['n']}/5 | "
-                     f"{r['mean']:.4f} ± {r['std']:.4f} |\n")
+        if dataset_source == "real":
+            fh.write("| Config | Dataset | Segment | n_seeds | overall_acc mean ± std |\n")
+            fh.write("|---|---|---|---|---|\n")
+            for r in rows:
+                fh.write(f"| {r['config']} | {r['dataset']} | {r['segment']} | {r['n']}/5 | "
+                         f"{r['mean']:.4f} ± {r['std']:.4f} |\n")
+        else:
+            fh.write("| Config | Dataset | n_seeds | overall_acc mean ± std |\n")
+            fh.write("|---|---|---|---|\n")
+            for r in rows:
+                fh.write(f"| {r['config']} | {r['dataset']} | {r['n']}/5 | "
+                         f"{r['mean']:.4f} ± {r['std']:.4f} |\n")
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Phase 4 0b: multi-seed driver")
+    p = argparse.ArgumentParser(description="Multi-seed driver (Phase 4 0b + Phase 5 real)")
     p.add_argument("--dry_run", action="store_true",
                    help="仅打印命令，不执行")
     p.add_argument("--n_parallel", type=int, default=1,
-                   help="同一数据集内并行 seed 数（默认 1=串行）")
+                   help="同一数据集内并行任务数（默认 1=串行）")
     p.add_argument("--configs", type=str, default=",".join(CONFIGS),
                    help=f"逗号分隔 config 子集，可选 {CONFIGS}")
     p.add_argument("--datasets", type=str, default=",".join(DATASETS),
-                   help=f"逗号分隔 dataset 子集，可选 {DATASETS}")
+                   help=f"逗号分隔 dataset 子集，合成 {DATASETS}，真实 {REAL_DATASETS}")
     p.add_argument("--seeds", type=str, default=",".join(map(str, SEEDS)),
                    help="逗号分隔 seed 列表")
+    p.add_argument("--dataset_source", type=str, default="synthetic",
+                   choices=["synthetic", "real"],
+                   help="合成（默认）或真实（Phase 5）")
+    p.add_argument("--segments", type=str, default=",".join(SEGMENTS),
+                   help=f"real 时使用，逗号分隔 segment 子集，可选 {SEGMENTS}")
+    p.add_argument("--segment_size", type=int, default=5000,
+                   help="real 时 segment 大小（A+ 协议默认 5000）")
+    p.add_argument("--partial_tag", type=str, default="",
+                   help="partial.md 文件名后缀，例如 '_electricity'（Stage A/B 分开追踪）")
     return p.parse_args()
 
 
@@ -228,16 +289,40 @@ def main():
     configs = [c.strip() for c in args.configs.split(",") if c.strip()]
     datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+    segments = (
+        [s.strip() for s in args.segments.split(",") if s.strip()]
+        if args.dataset_source == "real" else ["start"]  # synthetic 占位
+    )
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     log_dir = LOGS_DIR / "multiseed"
 
-    # 计划：外层 dataset 串行，每个 dataset 内 (config × seeds) 池
-    total = len(configs) * len(datasets) * len(seeds)
-    print(f"=== Multi-seed driver ===")
+    # 计划：外层 dataset 串行，每个 dataset 内 (config × segments × seeds) 池
+    n_per_dataset = len(configs) * len(seeds) * (len(segments) if args.dataset_source == "real" else 1)
+    total = n_per_dataset * len(datasets)
+    print(f"=== Multi-seed driver ({args.dataset_source}) ===")
     print(f"configs={configs}  datasets={datasets}  seeds={seeds}")
+    if args.dataset_source == "real":
+        print(f"segments={segments}  segment_size={args.segment_size}")
     print(f"total runs: {total}  parallelism within dataset: {args.n_parallel}")
     print(f"dry_run: {args.dry_run}")
+
+    def _enumerate_tasks(dataset: str) -> list:
+        tasks = []
+        for config in configs:
+            for seed in seeds:
+                if args.dataset_source == "real":
+                    for seg in segments:
+                        if npz_path(config, dataset, seed, "real", seg).exists():
+                            print(f"  [skip] {npz_path(config, dataset, seed, 'real', seg).name}")
+                            continue
+                        tasks.append((config, dataset, seed, seg))
+                else:
+                    if npz_path(config, dataset, seed).exists():
+                        print(f"  [skip] {npz_path(config, dataset, seed).name}")
+                        continue
+                    tasks.append((config, dataset, seed))
+        return tasks
 
     if args.dry_run:
         print("\n--- planned commands (dry-run) ---")
@@ -245,16 +330,15 @@ def main():
         n_plan = 0
         for dataset in datasets:
             print(f"\n## dataset = {dataset}")
-            for config in configs:
-                for seed in seeds:
-                    if npz_path(config, dataset, seed).exists():
-                        print(f"  [skip] {npz_path(config, dataset, seed).name}")
-                        n_skip += 1
-                        continue
-                    cmd = build_full_cmd(config, dataset, seed)
-                    print("  " + " ".join(cmd))
-                    n_plan += 1
-        print(f"\n--- summary: {n_plan} runs to execute, {n_skip} skipped (already present) ---")
+            tasks = _enumerate_tasks(dataset)
+            for task in tasks:
+                if args.dataset_source == "real":
+                    cmd = build_full_cmd(task[0], task[1], task[2], "real", task[3], args.segment_size)
+                else:
+                    cmd = build_full_cmd(task[0], task[1], task[2])
+                print("  " + " ".join(cmd))
+                n_plan += 1
+        print(f"\n--- summary: {n_plan} runs to execute ---")
         return
 
     overall_t0 = time.time()
@@ -262,15 +346,7 @@ def main():
 
     for dataset in datasets:
         print(f"\n========== dataset: {dataset} ==========")
-        # 该 dataset 下所有待执行任务（跳过已存在的）
-        tasks = []
-        for config in configs:
-            for seed in seeds:
-                if npz_path(config, dataset, seed).exists():
-                    print(f"  [skip] {npz_path(config, dataset, seed).name}")
-                    # 仍然写入 partial 让 summary 能反映
-                    continue
-                tasks.append((config, dataset, seed))
+        tasks = _enumerate_tasks(dataset)
 
         if not tasks:
             continue
@@ -283,7 +359,7 @@ def main():
                 all_records.append(rec)
                 print(f"  [{rec['status']}] {rec['config']} / {rec['dataset']} / seed{rec['seed']} "
                       f"acc={rec['overall_acc']} elapsed={rec['elapsed_sec']:.0f}s log={rec['log']}")
-                write_partial_summary()
+                write_partial_summary(args.dataset_source, args.partial_tag)
         else:
             # 同 dataset 内并行
             with ProcessPoolExecutor(max_workers=n_par) as ex:
@@ -293,8 +369,8 @@ def main():
                     all_records.append(rec)
                     print(f"  [{rec['status']}] {rec['config']} / {rec['dataset']} / seed{rec['seed']} "
                           f"acc={rec['overall_acc']} elapsed={rec['elapsed_sec']:.0f}s log={rec['log']}")
-                    write_partial_summary()
-                    if rec["config"] == "phase4a":
+                    write_partial_summary(args.dataset_source, args.partial_tag)
+                    if rec["config"] == "phase4a" and rec.get("dataset_source", "synthetic") == "synthetic":
                         append_phase4a_partial_row(rec)
 
     total_elapsed = time.time() - overall_t0
