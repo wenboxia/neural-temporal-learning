@@ -51,12 +51,17 @@ def parse_args():
     )
     parser.add_argument(
         "--segment_id", type=str, default="start",
-        choices=["start", "middle", "end"],
-        help="real 数据集的 contiguous segment 选择（仅 dataset_source=real 时生效）",
+        choices=["start", "middle", "end",
+                 "early", "mid", "late_pre", "late_post"],
+        help="real 数据集 segment 选择（A+: start/middle/end；B1+ aligned: early/mid/late_pre/late_post）",
     )
     parser.add_argument(
         "--segment_size", type=int, default=5000,
-        help="real 数据集的 segment 大小（默认 5000，A+ 协议）",
+        help="real 数据集的 segment 大小（默认 5000，A+ 协议；aligned 模式下被忽略）",
+    )
+    parser.add_argument(
+        "--insects_aligned", action="store_true",
+        help="Insects 用 4 个 drift-aligned segments（Phase 5 Stage B1+）；其他 dataset 忽略",
     )
     parser.add_argument("--n_samples", type=int, default=5000, help="样本总数")
     parser.add_argument("--n_features", type=int, default=10, help="特征维度（rotating_boundary 建议用 2）")
@@ -91,9 +96,11 @@ def run_tabpfn_baseline(args):
 
     # 1. 生成 / 加载数据
     if args.dataset_source == "real":
-        print(f"加载真实数据集 {args.dataset} segment={args.segment_id}...")
+        aligned_tag = " [aligned]" if args.insects_aligned else ""
+        print(f"加载真实数据集 {args.dataset} segment={args.segment_id}{aligned_tag}...")
         dataset = load_real_world(
-            args.dataset, segment_id=args.segment_id, size=args.segment_size
+            args.dataset, segment_id=args.segment_id, size=args.segment_size,
+            insects_aligned=args.insects_aligned,
         )
         args.n_features = dataset.X.shape[1]
     else:

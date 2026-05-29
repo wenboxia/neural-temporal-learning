@@ -65,10 +65,22 @@ _INSECTS_CSV_FEATURE_COLS = [f"f{i}" for i in range(1, 34)]
 # 限制：exact species mapping not retrievable in experimental window；论文 Limitations 须写明。
 _INSECTS_BINARIZE_MAP = {2: 0, 4: 0, 11: 0, 3: 1, 5: 1, 12: 1}
 
-# Souza 2020 文档提到 abrupt_balanced 含 5 个 abrupt drift；以下索引来自本仓库
-# 2026-04-29 的 50-chunk P(y) shift 诊断 (top L1 chunk boundaries 12/14/17/44/49)，
-# 仅作元数据注解，不在 segment 切片时 hard rely (segment_id 决定切哪段)。
-_INSECTS_DRIFT_POINTS_HINT = [12_500, 14_600, 17_900, 46_500, 51_800]
+# Souza 2020 文档提到 abrupt_balanced 含 5 个 abrupt drift；2026-04-29 50-chunk 诊断
+# 给的 5 个候选位置（精修版 ≈ 12,672 / 14,256 / 17,952 / 46,728 / 52,008）。
+_INSECTS_DRIFT_POINTS_HINT = [12_672, 14_256, 17_952, 46_728, 52_008]
+
+# Phase 5 Stage B re-aligned (B1+, 2026-05-01)：
+# 原 A+ 协议 (start/middle/end) 上 detector 0/15 触发，post-hoc 诊断发现 14/15 segment
+# 不含任何 documented drift，且 binarization 进一步稀释信号。重新设计 4 个 drift-aligned
+# 非重叠 5000-sample segments 覆盖全 5/5 drift，每个 drift 距 segment 边界 ≥ 200 samples
+# (ADWIN min_subwindow 缓冲)。归档旧数据于 results/archive_misaligned_stage_b/。
+_INSECTS_ALIGNED_BOUNDS = {
+    "early":     (10_000, 15_000),  # 覆盖 drift @ 12,672 + 14,256（local 2,672 / 4,256）
+    "mid":       (16_000, 21_000),  # 覆盖 drift @ 17,952           （local 1,952）
+    "late_pre":  (42_500, 47_500),  # 覆盖 drift @ 46,728           （local 4,228）
+    "late_post": (47_848, 52_848),  # 覆盖 drift @ 52,008           （local 4,160）
+}
+_INSECTS_ALIGNED_SEGMENTS = list(_INSECTS_ALIGNED_BOUNDS.keys())
 
 
 def _ensure_insects_csv(variant: str = "abrupt_balanced") -> str:
@@ -121,8 +133,15 @@ def load_insects(
     segment_id: str = "start",
     size: int = 5000,
     variant: str = "abrupt_balanced",
+    insects_aligned: bool = False,
 ) -> RealWorldDataset:
-    """加载 Insects 二值化 segment。"""
+    """加载 Insects 二值化 segment。
+
+    insects_aligned=False (default): segment_id ∈ {start, middle, end}, size 任意 ≤ N
+    insects_aligned=True (Phase 5 B1+): segment_id ∈ {early, mid, late_pre, late_post}，
+      bounds 由 `_INSECTS_ALIGNED_BOUNDS` 硬编码（覆盖全 5/5 drift），size 参数被忽略
+      （4 段都固定 5000 samples）。
+    """
     csv_path = _ensure_insects_csv(variant=variant)
     cols = _INSECTS_CSV_FEATURE_COLS + ["class"]
     df = pd.read_csv(csv_path, header=None, names=cols)
@@ -137,21 +156,37 @@ def load_insects(
     y_full = df["class"].map(_INSECTS_BINARIZE_MAP).to_numpy(dtype=np.int64)
     X_full = df[_INSECTS_CSV_FEATURE_COLS].to_numpy(dtype=np.float32)
 
-    X_seg, y_seg = take_segment(X_full, y_full, segment_id=segment_id, size=size)
+    if insects_aligned:
+        if segment_id not in _INSECTS_ALIGNED_BOUNDS:
+            raise ValueError(
+                f"insects_aligned=True requires segment_id ∈ "
+                f"{_INSECTS_ALIGNED_SEGMENTS}, got {segment_id!r}"
+            )
+        seg_start, seg_end = _INSECTS_ALIGNED_BOUNDS[segment_id]
+        X_seg = X_full[seg_start:seg_end].copy()
+        y_seg = y_full[seg_start:seg_end].copy()
+    else:
+        if segment_id not in {"start", "middle", "end"}:
+            raise ValueError(
+                f"insects_aligned=False requires segment_id ∈ "
+                f"{{start, middle, end}}, got {segment_id!r}"
+            )
+        X_seg, y_seg = take_segment(X_full, y_full, segment_id=segment_id, size=size)
+        seg_start, seg_end = _segment_bounds(len(X_full), segment_id, size)
+
     X_seg = _prequential_normalize(X_seg, fit_size=200)
 
-    # drift_points 映射到 segment 局部坐标
-    seg_start, seg_end = _segment_bounds(len(X_full), segment_id, size)
     local_drift = [
         int(d - seg_start)
         for d in _INSECTS_DRIFT_POINTS_HINT
         if seg_start < d < seg_end
     ]
+    suffix = "aligned_" if insects_aligned else ""
     return RealWorldDataset(
         X=X_seg,
         y=y_seg,
         drift_points=local_drift,
-        name=f"insects_{variant}_{segment_id}",
+        name=f"insects_{variant}_{suffix}{segment_id}",
     )
 
 
@@ -250,16 +285,23 @@ def _prequential_normalize(X: np.ndarray, fit_size: int = 200) -> np.ndarray:
 
 
 def load_real_world(
-    name: str, segment_id: str = "start", size: int = 5000, **kwargs
+    name: str, segment_id: str = "start", size: int = 5000,
+    insects_aligned: bool = False, **kwargs,
 ) -> RealWorldDataset:
     """
-    name ∈ {"electricity", "insects"}; segment_id ∈ {"start", "middle", "end"}.
+    name ∈ {"electricity", "insects"};
+    segment_id ∈ {"start", "middle", "end"} 或 (insects_aligned=True 时)
+                  {"early", "mid", "late_pre", "late_post"}.
 
     Insects 当前固定 variant="abrupt_balanced"（Phase 5 §决策），可由 kwargs 传入覆盖。
+    insects_aligned 仅对 Insects 生效，Electricity 忽略。
     """
     if name == "electricity":
         return load_electricity(segment_id=segment_id, size=size)
     if name == "insects":
         variant = kwargs.pop("variant", "abrupt_balanced")
-        return load_insects(segment_id=segment_id, size=size, variant=variant)
+        return load_insects(
+            segment_id=segment_id, size=size, variant=variant,
+            insects_aligned=insects_aligned,
+        )
     raise ValueError(f"unknown real-world dataset {name!r}")

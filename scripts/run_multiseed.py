@@ -36,12 +36,14 @@ SEEDS = [42, 123, 456, 789, 1024]
 DATASETS = ["regime_switching", "rotating_boundary", "combined_drift"]
 REAL_DATASETS = ["electricity", "insects"]
 SEGMENTS = ["start", "middle", "end"]
+SEGMENTS_ALIGNED = ["early", "mid", "late_pre", "late_post"]
 CONFIGS = ["phase1", "phase2", "phase3", "phase4a"]
 
 # 各 (config, dataset) 的 base 命令（不含 --seed / --out_tag / segment）
 def build_base_cmd(
     config: str, dataset: str, dataset_source: str = "synthetic",
     segment_id: str = "start", segment_size: int = 5000,
+    insects_aligned: bool = False,
 ) -> list[str]:
     """返回该 (config, dataset) 的命令模板，调用方再加 --seed / --out_tag / 真实数据 flags。"""
     if config == "phase1":
@@ -65,6 +67,8 @@ def build_base_cmd(
             "--segment_id", segment_id,
             "--segment_size", str(segment_size),
         ]
+        if insects_aligned and dataset == "insects":
+            cmd += ["--insects_aligned"]
     else:
         if dataset == "rotating_boundary":
             if config != "phase1":
@@ -85,7 +89,8 @@ def out_tag(
     dataset_source: str = "synthetic", segment_id: str = "start",
 ) -> str:
     if dataset_source == "real":
-        # Phase 5: real data tag 含 segment_id 区分 3 段
+        # Phase 5: real data tag 含 segment_id；aligned 段名 (early/mid/late_pre/late_post)
+        # 与 A+ 段名 (start/middle/end) 不冲突，无需额外标记
         return f"multiseed_{config}_real_{dataset}_{segment_id}_seed{seed}"
     # 合成 phase4a 第五轮 (Day 2 fit05random)：indicator + fit=0.5 + random init
     if config == "phase4a":
@@ -103,9 +108,11 @@ def npz_path(
 def build_full_cmd(
     config: str, dataset: str, seed: int,
     dataset_source: str = "synthetic", segment_id: str = "start",
-    segment_size: int = 5000,
+    segment_size: int = 5000, insects_aligned: bool = False,
 ) -> list[str]:
-    cmd = build_base_cmd(config, dataset, dataset_source, segment_id, segment_size)
+    cmd = build_base_cmd(
+        config, dataset, dataset_source, segment_id, segment_size, insects_aligned,
+    )
     cmd += [
         "--seed", str(seed),
         "--out_tag", out_tag(config, dataset, seed, dataset_source, segment_id),
@@ -180,7 +187,7 @@ def append_phase4a_partial_row(rec: dict) -> None:
         )
 
 
-def run_one(task: tuple, log_dir: Path) -> dict:
+def run_one(task: tuple, log_dir: Path, insects_aligned: bool = False) -> dict:
     """跑一个 task；synthetic = (config, dataset, seed)，real = (config, dataset, seed, segment_id)。"""
     if len(task) == 4:
         config, dataset, seed, segment_id = task
@@ -192,7 +199,10 @@ def run_one(task: tuple, log_dir: Path) -> dict:
     log_path = log_dir / f"{out_tag(config, dataset, seed, dataset_source, segment_id)}.log"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    cmd = build_full_cmd(config, dataset, seed, dataset_source, segment_id)
+    cmd = build_full_cmd(
+        config, dataset, seed, dataset_source, segment_id,
+        insects_aligned=insects_aligned,
+    )
     t0 = time.time()
     try:
         with open(log_path, "w") as fh:
@@ -280,6 +290,9 @@ def parse_args():
                    help="real 时 segment 大小（A+ 协议默认 5000）")
     p.add_argument("--partial_tag", type=str, default="",
                    help="partial.md 文件名后缀，例如 '_electricity'（Stage A/B 分开追踪）")
+    p.add_argument("--insects_aligned", action="store_true",
+                   help="Insects 用 4 个 drift-aligned segments (Phase 5 B1+)；"
+                        "会自动把 --segments 默认改为 early,mid,late_pre,late_post")
     return p.parse_args()
 
 
@@ -333,7 +346,10 @@ def main():
             tasks = _enumerate_tasks(dataset)
             for task in tasks:
                 if args.dataset_source == "real":
-                    cmd = build_full_cmd(task[0], task[1], task[2], "real", task[3], args.segment_size)
+                    cmd = build_full_cmd(
+                        task[0], task[1], task[2], "real", task[3], args.segment_size,
+                        insects_aligned=args.insects_aligned,
+                    )
                 else:
                     cmd = build_full_cmd(task[0], task[1], task[2])
                 print("  " + " ".join(cmd))
@@ -355,7 +371,7 @@ def main():
         if n_par == 1:
             # 串行
             for task in tasks:
-                rec = run_one(task, log_dir)
+                rec = run_one(task, log_dir, insects_aligned=args.insects_aligned)
                 all_records.append(rec)
                 print(f"  [{rec['status']}] {rec['config']} / {rec['dataset']} / seed{rec['seed']} "
                       f"acc={rec['overall_acc']} elapsed={rec['elapsed_sec']:.0f}s log={rec['log']}")
@@ -363,7 +379,7 @@ def main():
         else:
             # 同 dataset 内并行
             with ProcessPoolExecutor(max_workers=n_par) as ex:
-                futs = {ex.submit(run_one, t, log_dir): t for t in tasks}
+                futs = {ex.submit(run_one, t, log_dir, args.insects_aligned): t for t in tasks}
                 for fut in as_completed(futs):
                     rec = fut.result()
                     all_records.append(rec)

@@ -778,7 +778,82 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 
 **End segment class imbalance**：min/max=0.85（更平衡），未触发"imbalanced metric 失效"风险，y bincount 三段稳定。
 
-完整 plan 见 [phase5_plan.md](phase5_plan.md)。Stage B Insects 待启动。
+### Phase 5 Stage B (原 A+ 协议) — **archived**（2026-05-03）
+
+45 runs（3 phases × 3 segments × 5 seeds），2897 min ≈ 48.3h wall。**关键结果**：detector 0/15 触发跨所有 segment。post-hoc 诊断发现 A+ 协议 (start/middle/end) 的 14/15 segments 不含任何 documented drift event：
+
+- start [0, 5000) — 0 drifts (全 5 个 drifts ≥ 12.7k > 5000)
+- middle [23924, 28924) — 0 drifts (5 个 drifts 全 < 23924 或 > 46508)
+- end [47848, 52848) — 1 drift @ local 3945 (= absolute 51800)
+
+A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `results/archive_misaligned_stage_b/`，保留 methodology narrative arc（"protocol identification through post-hoc empirical analysis"）。
+
+### Phase 5 Stage B B1+ (re-aligned) — 完成（2026-05-29）
+
+**协议升级**：4 个 drift-aligned 非重叠 5000-sample segments 覆盖全 5/5 documented drifts：
+
+| segment | 范围 | 覆盖 drift @ local | drift 距边界 |
+|---|---|---|---|
+| early     | [10000, 15000) | 2,672 + 4,256   | ≥ 744 ✓ |
+| mid       | [16000, 21000) | 1,952           | ≥ 1,952 ✓ |
+| late_pre  | [42500, 47500) | 4,228           | ≥ 772 ✓ |
+| late_post | [47848, 52848) | 4,160           | ≥ 840 ✓ |
+
+60 runs（3 phases × 4 segments × 5 seeds），3606 min ≈ 60.1h wall (n_parallel=2)，全部 `[ok]`。
+
+**关键 t-test n=20 (4 seg × 5 seed)**：
+
+| Comparison | Δ (pp) | t | p | sig? |
+|---|---|---|---|---|
+| phase3 vs phase1     | −0.101 | −3.48 | 0.0025 | sig 负 |
+| **phase4a vs phase1**    | **−0.172** | **−5.42** | **<0.0001** | **sig 负** |
+| phase4a vs phase3    | −0.071 | −1.98 | 0.0626 | NS 边缘 |
+
+**Per-segment phase4a vs phase1**：3/4 sig 负（early −0.217 / mid −0.179 / late_post −0.183，late_pre −0.108 NS）。
+
+**F3 detector triggers**：**0/20** 跨全 segment 全 seed。drift 全覆盖 + buffer 保证下仍沉默 → protocol-side blame 完全排除。
+
+**F4 reuse**：vacuous（0 routes / 0 consolidations / n_adapters=1 全 20 runs）。
+
+完整数字 + per-segment 分解见 [phase5_real_summary_insects.md](results/phase5_real_summary_insects.md)。
+
+### Phase 5 — γ Confound #2 Diagnostic（2026-05-29）
+
+**问题**：B1+ 协议下 detector 仍 0/20，confound #1 (A+ misalignment) 排除。confound #2 (binarization dilution) 是 dominant 候选？
+
+**直接证据**：每 drift 前后 ±200 步 indicator (= 0/1 error stream) 均值统计：
+
+| Drift @ segment | indicator pre | indicator post | \|Δ\| |
+|---|---|---|---|
+| 2672 @ early    | 0.015 | 0.020 | 0.005 |
+| 1952 @ mid      | 0.015 | 0.011 | 0.004 |
+| 4228 @ late_pre | 0.044 | 0.025 | 0.019 |
+| 4160 @ late_post | 0.010 | 0.000 | 0.010 |
+
+**所有 drift 跨全 segment \|Δ indicator\| ≤ 0.019** — 比合成 regime_switching 的 0.20 信号 **小 10×**，无法穿越 ADWIN 检测阈值。
+
+但 P(y_pred=1) shifts 0.03~0.13，**模型预测确实跟着 drift 动了**，indicator 没动是因为 **TabPFN sliding-context 在 ~10-20 步 in-context relearn 内吃掉了 P(y) shift，预测正确率几乎不变**。
+
+**机制定位**：indicator-detector 在 frozen TabPFN + sliding context 系统上对真实 abrupt drift 是 **detector-blind** 的——因为 TabPFN self-adaptation 速度 outpaces ADWIN 检测延迟。合成 regime_switching 上 12/15 触发率是 "by-design independent regimes" 强制慢速 relearn 的 artifact。
+
+12 张 γ 诊断图：`results/phase5_confound2_diag_insects_{seg}_{indicator,pred1,soft_err}.png` × 4×3。
+
+完整诊断见 [phase5_confound2_diagnostic.md](results/phase5_confound2_diagnostic.md)。
+
+### Phase 5 Combined Verdict（2026-05-29）
+
+完整跨 Stage A + Stage B1+ + γ 诊断的 5 个论文级 verdicts (V1-V5) + F1-F4 复现矩阵见 [phase5_real_summary.md](results/phase5_real_summary.md)。
+
+**核心 5 verdicts**：
+- **V1**: F3 在真实 abrupt drift 上完全失效 (0/20) — **最强 negative finding**，扩展 F2 ("TabPFN 自适应消化 error 信号") 到 indicator stream
+- **V2**: F4 reuse 失活在 Electricity 完全复现 (1/1 create)，在 Insects vacuous (无 routes)
+- **V3**: Phase 3 sig 负向真实数据同向复现（Electricity −0.124 sig / Insects −0.101 sig）
+- **V4**: rotating_boundary +1pp 改善是合成 artifact (Electricity gradual −0.064 NS)
+- **V5**: phase4a 真实数据 net negative (Insects −0.172 sig p<0.0001)
+
+**Phase 5 不要求"赢"的设计精神达成**：findings 复现（无论正反），methodology narrative 自洽，paper 起点就绪。**论文核心 contribution 升级**：从"设计 trap 系统性 mapping"扩展到"该 mapping 在真实 abrupt drift 上的 systemic failure mode 量化定位"。
+
+完整 plan 见 [phase5_plan.md](phase5_plan.md)。Phase 5 完成 → Phase 6 论文撰写就绪。
 
 ---
 
