@@ -102,7 +102,7 @@ Orchestrator: `src/models/multi_timescale.py` `MultiTimescaleModel.step(X_ctx, y
 | `src/utils/metrics.py` | ✅ | `summarize_results()`, `window_accuracy()`, adaptation speed; balanced acc + AUC-ROC (Phase 2.5). |
 | `src/drift/error_detector.py` | ✅ | ADWIN change-point detection on 1D error stream (Phase 4 Day 1.5). |
 | `src/regime/adapter_library.py` | ✅ | Per-regime AdapterLibrary (nn.ModuleDict) with hard routing + per-adapter optimizer (Phase 4 Day 1.5). |
-| `src/data/real_world.py` | 🚧 Phase 5 | OpenML loader for Electricity (id=151) + Insects (incremental); A+ 3-segment slicer. |
+| `src/data/real_world.py` | ✅ | OpenML loader for Electricity (id=151) + Insects (abrupt_balanced via river GD mirror) with drift-aligned 4-segment slicer. |
 
 ### Experiment Progress
 
@@ -128,8 +128,14 @@ Orchestrator: `src/models/multi_timescale.py` `MultiTimescaleModel.step(X_ctx, y
   - **Critical correction**: Day 1.5 wrote "warm-start is anti-pattern on abrupt boundary reversal" — this was overclaim. Day 2 shows init_strategy is secondary factor across all datasets (< 0.1pp effect, NS). Real driver of combined_drift regression is fit_threshold widening, not init choice.
   - **Best rotating_boundary across all 5 stages**: fit05random gives +1.52pp sig (vs warmstart +1.32, indicator +1.51, abs +1.45, raw +1.36).
   - 5-stage verdict: combined_drift fails core acceptance across all 5 variants (−0.28 to −0.55pp); rotating_boundary +1pp preserved across all 5 (+1.32 to +1.52pp sig).
-- **Phase 5** (real-world validation): 🚧 待启动 (Day 2 之后). **Electricity** (OpenML 151, gradual / seasonal) + **Insects (incremental)** (regime drift). A+ subsampling protocol: 3 non-overlapping 5000-sample contiguous segments × 5 seeds × 3 phases (1/3/4 indicator) = 45 runs/dataset = 90 runs ≈ 45h CPU. Only Phase 4 indicator on real (raw/abs/warmstart skipped). NOT running OpenML-CC18 (static benchmark, drift-irrelevant). combined_drift has no canonical real-world analog — kept as synthetic-only stress test. Full plan in [phase5_plan.md](phase5_plan.md).
-- **Phase 6** (paper writing): ❌ Pending Phase 5. Two versions: 毕业论文 (含 Phase 2/2.5 appendix, 中文+英文摘要) + 投稿版 (workshop/short paper, 英文, ~8 章). Title drops "PFC", uses "Multi-Timescale / Hierarchical" ML terminology. Ch2.3 retains half-page biological motivation note explicitly stating frozen TabPFN cannot do weight-level consolidation. Negative-result methodology framing.
+- **Phase 5** (real-world validation): ✅ Complete (2026-05-29). Three sub-stages run on Electricity (OpenML 151, gradual) + Insects (abrupt_balanced via river GD mirror, abrupt regime):
+  - **Stage A Electricity** (45 runs, A+ 3-segment protocol): Phase 4a vs Phase 1 −0.064 NS / Phase 3 vs Phase 1 −0.124 sig; F3 detector triggered 1/15 (gradual drift → silence expected, matches synthetic rotating); F4 reuse 1/1 create (replicates synthetic).
+  - **Stage B Insects (A+ misaligned)** (45 runs, archived): F3 0/15 triggered, but post-hoc found 14/15 segments contained NO documented drift event (uniform start/middle/end did not align with drift positions 12.7k/14.3k/17.9k/46.7k/52.0k). Result methodologically invalid. Archived in `results/archive_misaligned_stage_b/`.
+  - **Stage B1+ Insects (drift-aligned 4-segment)** (60 runs): Re-designed segments early[10000,15000)/mid[16000,21000)/late_pre[42500,47500)/late_post[47848,52848) covering all 5 documented drifts with ≥744-step ADWIN buffer. Phase 4a vs Phase 1 **−0.172 sig p<0.0001** (NET NEGATIVE, worse than A+ misaligned baseline of −0.075); F3 **still 0/20** under valid drift exposure; F4 vacuous (0 routes).
+  - **γ Confound #2 Diagnostic**: Indicator mean shift |Δ| ≤ 0.019 per drift event (vs synthetic regime_switching 0.20 — **10× signal dilution**). P(y_pred=1) shift 0.03-0.13 (model DOES track drift), but TabPFN's sliding-context in-context relearn (~10-20 steps) absorbs accuracy degradation before indicator stream shifts enough for ADWIN to trigger. **Mechanism**: indicator-detector is *detector-blind* on frozen TabPFN — foundation model self-adaptation outpaces change-point detector delay. Synthetic regime_switching 12/15 triggers is artifact of "by-design independent regimes" forcing slow relearn.
+  - **5 paper-grade verdicts (V1-V5)**: V1 F3 fails on real abrupt drift (mechanistic), V2 F4 replicates / vacuous, V3 Phase 3 negative direction replicates, V4 rotating +1pp is synthetic artifact, V5 Phase 4a net negative on real abrupt drift.
+  - Full plan + outcome in [phase5_plan.md](phase5_plan.md); combined verdict in [results/phase5_real_summary.md](results/phase5_real_summary.md); γ diagnostic in [results/phase5_confound2_diagnostic.md](results/phase5_confound2_diagnostic.md).
+- **Phase 6** (paper writing): 🚧 待启动. **Framing upgraded** from "negative-result methodology" to **"mechanistic discovery + methodology contribution"** based on Phase 5 γ diagnostic finding (TabPFN absorption mechanism quantified). Title candidate: *"When Foundation Models Outrun Drift Detectors: A Mechanistic Study of Adaptation-Detection Mismatch in TabPFN"*. Two versions: 毕业论文 (含 Phase 2/2.5 appendix, 中文+英文摘要) + TMLR 投稿版 (英文, ~10 章). Title drops "PFC", uses "Multi-Timescale / Hierarchical" ML terminology. Path 2 (TMLR) chosen — no GPU, no algorithm overhaul needed, negative+mechanistic framing accepted by TMLR. β binarization ablation NOT done — γ diagnostic already mechanistically explains F3 failure (TabPFN absorption, not binarization), β would be redundant. Estimated 6-8 weeks to TMLR acceptance (drafting 2-3 weeks + revision 1-2 rounds).
 
 ### Synthetic Datasets
 
@@ -145,15 +151,19 @@ All three generators produce `SyntheticDataset(X, y, regime_labels, drift_points
 
 ## Key Documents
 
-- `progress_report.md` — full experimental narrative (Phase 1 → Phase 4 Day 1.5 + Phase 5/6 plan stubs)
+- `progress_report.md` — full experimental narrative (Phase 1 → Phase 5 Combined Verdict + Phase 6 stub)
 - `phase4_plan.md` — Phase 4 plan (Cheap Diagnostic + Decision branch + Design A spec)
-- `phase5_plan.md` — **Phase 5 (real-world validation) + Phase 4 Day 2 cleanup + Phase 6 (paper) plan** ← 当前 active 计划
+- `phase5_plan.md` — Phase 5 plan + Phase 4 Day 2 cleanup + Phase 6 (paper) outline ← Phase 5 已完成
 - `implementation_plan_v2.md` — V2 design spec (current code follows this)
 - `idea_difference.md` — V1 (PDF) vs V2 design comparison
 - `claude-code-workflow-setup.md` — `.claude/` config blueprint
 - `results/oracle_summary.md` / `results/multiseed_summary.md` / `results/day05_decision.md` — Phase 4 Day 0.5 outputs
-- `results/phase4_final_verdict.md` — Phase 4 Day 1.5 四段终极对照表 + 论文章节大纲建议
-- `results/phase4_a_summary_{indicator,warmstart}.md` — Day 1.5 各轮详细 summary
+- `results/phase4_final_verdict.md` — Phase 4 Day 1.5 五段终极对照表 + 论文章节大纲建议
+- `results/phase4_a_summary_{indicator,warmstart,fit05random}.md` — Day 1.5/Day 2 各轮详细 summary
+- `results/phase5_real_summary.md` — **Phase 5 combined verdict (Stage A + B1+ + γ)** ← Phase 6 写作起点
+- `results/phase5_real_summary_electricity.md` / `phase5_real_summary_insects.md` — Stage A / B1+ 各自详细数字
+- `results/phase5_confound2_diagnostic.md` — γ 诊断 + TabPFN absorption 机制定位
+- `results/archive_misaligned_stage_b/` — 旧 A+ misaligned Stage B 数据归档（保留 methodology narrative arc）
 
 ## Project-Level Subagents
 

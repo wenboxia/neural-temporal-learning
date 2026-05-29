@@ -1,8 +1,29 @@
 # Phase 5 — Real-World Validation Plan
 
-**日期**：2026-04-28
+**日期**：2026-04-28（plan 起草）/ 2026-05-29（Phase 5 完成）
 **前置依赖**：Phase 4 Day 1.5 已完成四轮 detector input ablation（raw / abs / indicator / warmstart）。Phase 4 Day 2 收尾任务（option B confound-busting）见 §0。
-**后续**：Phase 6 = 论文撰写（毕业论文 + 投稿版）。
+**后续**：Phase 6 = 论文撰写（毕业论文 + TMLR 投稿）。
+
+## ✅ Phase 5 完成状态汇总（2026-05-29 收尾）
+
+- §0 Phase 4 Day 2 (option B fit05random) ✅ 完成（commit `5d47ce3`）
+- §1-5 Stage A Electricity (45 runs, A+ 3-segment) ✅ 完成（commit `cb13e08`）
+- §1-5 Stage B Insects (原 A+ 协议 45 runs) ⚠️ **方法学失败**：14/15 segments 不含 documented drift → 归档至 `results/archive_misaligned_stage_b/`
+- §1-5 Stage B1+ Insects (drift-aligned 4-segment, 60 runs) ✅ 完成（commit `e368ca6`）
+- γ Confound #2 Diagnostic ✅ 完成 — 机制定位"TabPFN absorption outpaces ADWIN delay"
+
+**Phase 5 核心 5 verdicts**（详见 `results/phase5_real_summary.md`）：
+- **V1**: F3 indicator detector 在真实 abrupt drift 上**完全失效** (0/20) — 扩展 F2 到 indicator stream
+- **V2**: F4 reuse 失活在 Electricity 完全复现 (1/1 create)，Insects vacuous
+- **V3**: Phase 3 sig 负向真实数据同向复现（Electricity −0.124 / Insects −0.101）
+- **V4**: rotating_boundary +1pp 改善是合成 artifact (Electricity gradual −0.064 NS)
+- **V5**: phase4a 真实数据 net negative (Insects **−0.172 sig p<0.0001**)
+
+**关键 framing 升级**：原计划"Negative-Result Methodology Paper"→ 升级为"**Mechanistic Discovery + Methodology Contribution**"。γ 诊断量化了 indicator |Δ| ≤ 0.019 (vs 合成 0.20，10× 稀释)，将 F3 失败从"vague 现象"升级为"机制定位的 fundamental property"。
+
+**β binarization ablation 决定不做**：γ 已机制定位（TabPFN absorption 是主因，不是 binarization），β 5.4 天会得到冗余实证。
+
+**Phase 6 路径**：Path 2 (TMLR)，CPU only 不租 GPU，不动算法，重组叙事即可。预计 6-8 周到接受（drafting 2-3 周 + revision 1-2 轮）。
 
 ---
 
