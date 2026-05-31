@@ -2,7 +2,7 @@
 
 在**冻结的 TabPFN**（pre-trained tabular foundation model）之上构建多时间尺度（slow / inter / fast）adapter library 系统，应对表格数据的概念漂移问题。受前额叶皮层（PFC）多时间尺度结构启发，但因 TabPFN 权重不可微调（CPU only + 防 catastrophic forgetting），不声称生物建模。
 
-**项目状态**：Phase 1-5 完成 → Phase 6 (TMLR 投稿 + 毕业论文撰写) 待启动
+**项目状态**：Phase 1-5 完成 → Phase 6 毕业论文撰写待启动
 **最后更新**：2026-05-31
 
 ---
@@ -19,7 +19,7 @@
 | Phase 4 Day 1.5 | ✅ | 4-stage detector input ablation | raw/abs/indicator/warmstart |
 | Phase 4 Day 2 | ✅ | 2×2 confound 解耦 (fit_threshold × init) | fit_threshold 主因 70% |
 | **Phase 5** | ✅ | **真实数据验证** (Electricity + Insects abrupt) | **5 个 paper-grade verdicts** |
-| Phase 6 | 🚧 待启动 | 毕业论文 + TMLR 投稿撰写 | Title: *"When Foundation Models Outrun Drift Detectors..."* |
+| Phase 6 | 🚧 待启动 | 毕业论文撰写 | Title: *"When Foundation Models Outrun Drift Detectors..."* |
 
 ---
 

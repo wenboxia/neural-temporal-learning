@@ -963,7 +963,7 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 
 **两个版本**：
 - **毕业论文版**：完整含 Phase 2/2.5 appendix；中文 + 英文摘要；Phase 5 即使"不复现"也大段讨论
-- **投稿版**：workshop 或 short paper；英文；删 appendix；主章节 ~8 章
+- **简化扩展版**（如需要）：英文；删 appendix；主章节 ~8 章
 
 **核心定位**：负面结果 methodology paper，contribution = "在 TabPFN-class 自适应 in-context learner 之上做 concept drift adaptation 的设计 trap 系统性 mapping"。
 

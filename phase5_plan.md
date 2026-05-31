@@ -2,7 +2,7 @@
 
 **日期**：2026-04-28（plan 起草）/ 2026-05-29（Phase 5 完成）
 **前置依赖**：Phase 4 Day 1.5 已完成四轮 detector input ablation（raw / abs / indicator / warmstart）。Phase 4 Day 2 收尾任务（option B confound-busting）见 §0。
-**后续**：Phase 6 = 论文撰写（毕业论文 + TMLR 投稿）。
+**后续**：Phase 6 = 毕业论文撰写。
 
 ## ✅ Phase 5 完成状态汇总（2026-05-29 收尾）
 
@@ -23,7 +23,7 @@
 
 **β binarization ablation 决定不做**：γ 已机制定位（TabPFN absorption 是主因，不是 binarization），β 5.4 天会得到冗余实证。
 
-**Phase 6 路径**：Path 2 (TMLR)，CPU only 不租 GPU，不动算法，重组叙事即可。预计 6-8 周到接受（drafting 2-3 周 + revision 1-2 轮）。
+**Phase 6 路径**：CPU only 不租 GPU，不动算法，重组叙事即可。预计 drafting 2-3 周。
 
 ---
 
@@ -117,7 +117,7 @@ Phase 4 Day 1.5 warmstart 实验同时改了两个变量：
 ### 3.1 为什么是 A+
 
 - Electricity 45k / Insects ~57k 全跑 CPU 不现实（estimate 56–600h）
-- 单一 contiguous 5000 段（A）投稿弱：reviewer 会问"为什么是这一段"
+- 单一 contiguous 5000 段（A）样本选择敏感：可能被质疑"为什么是这一段"
 - 文献已知 drift 段（C）在 Electricity 上文献证据弱（"整段都漂移"，少 crisp 时刻指认），Insects 上 regime 标签本身就是 drift，C 不适用
 - A+ 三段统一协议跨数据集，paired t-test 协议干净
 
@@ -276,7 +276,7 @@ Appendix C: 详细 npz 字段说明 + 复现指引
 ### 7.2 关键叙事拆分
 
 - **毕业论文版**：完整含 Phase 2/2.5 appendix，Phase 5 即使发现"不复现"也大段讨论；中文 + 英文摘要
-- **投稿版**（workshop 或 short paper）：删 appendix A/B，主章节砍到 8 章左右；英文
+- **简化扩展版**（如需要）：删 appendix A/B，主章节砍到 8 章左右；英文
 
 ### 7.3 anticipate reviewer attack（每条至少 limitations 一句）
 
@@ -298,7 +298,7 @@ Appendix C: 详细 npz 字段说明 + 复现指引
 | Phase 5 Step 4-5 (Electricity + Insects multi-seed) | ~45h CPU，分 2-3 日 |
 | Phase 5 Step 6-7 (analysis + verdict update) | 半天 |
 | Phase 6 论文撰写（毕业版） | 2-4 周（看进度） |
-| Phase 6 投稿版 | 1-2 周（毕业版完成后） |
+| Phase 6 简化版（可选）| 1-2 周（毕业版完成后） |
 
 总：Phase 5 约 1 周（含等实验），Phase 6 数周。
 
@@ -313,4 +313,4 @@ Appendix C: 详细 npz 字段说明 + 复现指引
 - [x] 真实数据**只跑 Phase 4 indicator**，不跑 raw/abs/warmstart（Day 1.5 已证 indicator 是唯一激活 detector 的 input）
 - [x] Phase 4 Day 2 (option B) 跑 **fit_threshold=0.5 + random init**，补齐 2×2 析因
 - [x] 论文标题**去 PFC**，Ch2.3 半页保留生物灵感动机
-- [x] Phase 2/2.5 进 **Appendix A**，毕业论文留、投稿版可砍
+- [x] Phase 2/2.5 进 **Appendix A**，毕业论文留、简化版可砍

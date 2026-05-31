@@ -38,6 +38,9 @@ claude-code-workflow-setup.md
 implementation_plan.md
 idea_difference.md
 
+# Advisor's private PDF (not for public upload)
+*.pdf
+
 # Jupyter checkpoints
 .ipynb_checkpoints/
 

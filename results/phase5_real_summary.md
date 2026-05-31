@@ -94,4 +94,4 @@ B1+ 协议下仍 0/20 → **A+ misalignment 单独不足以解释 detector 沉�
 3. Ch8-10 (analysis + Phase 5 + limitations) — 2-3 天
 4. Ch11 conclusions + abstract — 1 天
 
-毕业版 1-2 周可成稿，投稿版 1-2 周再压。
+毕业版 1-2 周可成稿。
