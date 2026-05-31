@@ -11,9 +11,32 @@ venv/
 
 # Results and outputs (large files, keep PNGs)
 results/*.npz
+results/**/*.npz
 results/*.npy
 *.pt
 *.pkl
+
+# Live multi-seed driver partial md files (regenerated each run)
+results/*.partial.md
+results/**/*.partial.md
+
+# Intermediate summary files (superseded by progress_report.md)
+results/oracle_summary.md
+results/multiseed_summary.md
+results/day05_decision.md
+results/phase4_a_raw_summary.md
+results/phase4_a_summary_indicator.md
+results/phase4_a_summary_warmstart.md
+results/phase4_a_summary_fit05random.md
+
+# Dev infrastructure (Claude Code project workspace, not paper-relevant)
+.claude/
+claude-code-workflow-setup.md
+
+# Historical / stage-level docs (superseded or not paper-relevant)
+3_11建议与改进.md
+implementation_plan.md
+idea_difference.md
 
 # Jupyter checkpoints
 .ipynb_checkpoints/

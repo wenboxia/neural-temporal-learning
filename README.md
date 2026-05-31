@@ -63,14 +63,11 @@ vs 合成 regime_switching 0.20
 - [`phase4_plan.md`](phase4_plan.md) — Phase 4 plan (Cheap Diagnostic + Design A spec)
 - [`phase5_plan.md`](phase5_plan.md) — **Phase 5 plan + Phase 6 outline**（active 计划）
 - [`implementation_plan_v2.md`](implementation_plan_v2.md) — V2 设计 spec（当前代码遵循）
-- [`idea_difference.md`](idea_difference.md) — V1 (PDF) vs V2 设计对比
 
 ### Phase 4 实验输出
-- [`results/oracle_summary.md`](results/oracle_summary.md) — Day 0.5 oracle context-reset
-- [`results/multiseed_summary.md`](results/multiseed_summary.md) — Day 0.5 multi-seed Phase 3 修正
-- [`results/day05_decision.md`](results/day05_decision.md) — Day 0.5 Design A 决策
 - [`results/phase4_final_verdict.md`](results/phase4_final_verdict.md) — **Day 1.5 五段终极对照表 + 论文 10 章大纲**
-- [`results/phase4_a_summary_{indicator,warmstart,fit05random}.md`](results/) — Day 1.5/Day 2 各轮详细 summary
+- Day 0.5 oracle / multi-seed / Design A 决策细节：见 [progress_report.md](progress_report.md) §Phase 4 Day 0.5
+- Day 1.5 / Day 2 各轮详细 summary：见 [progress_report.md](progress_report.md) §Phase 4 Day 1.5 + §Phase 4 Day 2
 
 ### Phase 5 实验输出
 - [`results/phase5_real_summary.md`](results/phase5_real_summary.md) — **Stage A + B1+ combined verdict + F1-F4 矩阵**

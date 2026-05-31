@@ -155,15 +155,13 @@ All three generators produce `SyntheticDataset(X, y, regime_labels, drift_points
 - `phase4_plan.md` — Phase 4 plan (Cheap Diagnostic + Decision branch + Design A spec)
 - `phase5_plan.md` — Phase 5 plan + Phase 4 Day 2 cleanup + Phase 6 (paper) outline ← Phase 5 已完成
 - `implementation_plan_v2.md` — V2 design spec (current code follows this)
-- `idea_difference.md` — V1 (PDF) vs V2 design comparison
-- `claude-code-workflow-setup.md` — `.claude/` config blueprint
-- `results/oracle_summary.md` / `results/multiseed_summary.md` / `results/day05_decision.md` — Phase 4 Day 0.5 outputs
 - `results/phase4_final_verdict.md` — Phase 4 Day 1.5 五段终极对照表 + 论文章节大纲建议
-- `results/phase4_a_summary_{indicator,warmstart,fit05random}.md` — Day 1.5/Day 2 各轮详细 summary
 - `results/phase5_real_summary.md` — **Phase 5 combined verdict (Stage A + B1+ + γ)** ← Phase 6 写作起点
 - `results/phase5_real_summary_electricity.md` / `phase5_real_summary_insects.md` — Stage A / B1+ 各自详细数字
 - `results/phase5_confound2_diagnostic.md` — γ 诊断 + TabPFN absorption 机制定位
-- `results/archive_misaligned_stage_b/` — 旧 A+ misaligned Stage B 数据归档（保留 methodology narrative arc）
+- `results/archive_misaligned_stage_b/README.md` — 旧 A+ misaligned Stage B 数据归档说明（保留 methodology narrative arc）
+
+> 本地另有几个 stage-level / dev-infra 文档（intermediate phase summaries、`.claude/` workspace、`idea_difference.md`、`claude-code-workflow-setup.md`、`3_11建议与改进.md` 等）未推送到 GitHub —— 内容已被 `progress_report.md` 完整 supersede 或与论文无关，本地保留作开发参考；详见 `.gitignore`。
 
 ## Project-Level Subagents
 
