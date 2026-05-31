@@ -209,6 +209,12 @@ if fast_corrector.should_consolidate(): consolidator.consolidate(...)
 
 各数据集中 α/γ 的瞬时值在 [0, 1] 全程波动（min/max 接近 0 和 1），说明 gate 确实在"动态分配"而非塌缩到固定权重。这定性符合 plan V2 的预期：稳定期信任 slow，漂移期切换偏好。
 
+**Gate 轨迹细节放大**（regime_switching, drift 切换附近）：
+
+![Phase 3 gate zoom](results/phase3_regime_switching_gate_zoom.png)
+
+> 放大某次 drift 前后 200 步：可清楚看到 gate weights 在 drift 命中后 ~20 步内重新分配，但 β (inter/adapter) 始终维持在极低水平（< 0.05），印证"共享 adapter 跨 regime 无 transferable pattern"的关键诊断 —— 这是 Phase 4 走 per-regime adapter library 的原动机。
+
 ### 巩固事件
 
 **所有三个数据集的 `consolidation_events` 均为 0** —— 在最长的 `combined_drift`（5000 步、4800 评估步）中亦未触发。原因：`should_consolidate(window=50, bias_threshold=0.05)` 要求最近 50 步 buffer 的 |mean(errors)| > 0.05 且 std < |mean|，而 prequential 滚动下 fast_corrector 的误差分布大多围绕 0 抖动，难以同时满足"系统性偏移"与"低方差"。Phase 3D 的 in-script 训练替代了模板设想的"长期偏移触发巩固蒸馏"路径 —— 当 gate + adapter 已在每步训练，buffer 偏置很难积累到阈值。这条路径需要在 Phase 4 重新评估（要么调阈值/window，要么把 consolidation 改成基于"窗口准确率下滑"等其它信号）。
@@ -358,6 +364,14 @@ post-drift 反而下降是因为：之前 β≈0 时 adapter 不工作但也不�
 
 → Oracle 总体准确率 80.39% 落在决策表 **80-82% 中段**。
 
+**对比图**（seed 42 代表运行）：
+
+| Baseline（无 reset）| Oracle reset_size=50 |
+|---|---|
+| ![Oracle baseline seed42](results/oracle_baseline_seed42.png) | ![Oracle reset seed42](results/oracle_reset_seed42.png) |
+
+> 左图：Baseline TabPFN 在每次 drift 后准确率明显下降。右图：Oracle 在 drift 后立即截断 context 到 50 个最近样本，准确率恢复更快、平均水平更高。这验证了 context 污染是损失的部分来源，但仅占 ~1/3。
+
 ### 实验 0b：Multi-seed (5) 重跑现有 Phase 1 / 2 / 3 v2+B+F
 
 **自动化**：新建 `scripts/run_multiseed.py`，3 phase × 3 dataset × 5 seeds = **45 runs**。Wall time ~22h（n_parallel=3 on 10 cores；combined_drift 上 phase2 单脚本跑 3 corrector 是主要耗时源）。
@@ -478,6 +492,12 @@ phase4_plan 失败条件 = "rotating 失去 +1pp 赢点" → **未触发**（rot
 
 预计选项 A 单参数改动后重跑 5.5h，验证 detector 实际触发能否带动 combined_drift 翻转。
 
+**Raw run 代表图**（seed 42, regime_switching）：
+
+![Phase 4A raw regime_switching seed42](results/multiseed_phase4a_raw_regime_switching_seed42.png)
+
+> 三层 subplot：上 = window accuracy（红虚线 = drift point，紫点线 = detector triggers，全程无触发）；中 = α/β/γ gate weight 轨迹；下 = active adapter id（全程 = 0，library 未激活）。
+
 ### 数据 commits（raw run）
 
 - Step 1-5（实施 + smoke）
@@ -504,6 +524,12 @@ phase4_plan 失败条件 = "rotating 失去 +1pp 赢点" → **未触发**（rot
 **结论**：raw / abs 两路 detector 输入都被 TabPFN 自适应消化，必须升级到不依赖连续误差信号的 detector 输入。
 
 数据归档：raw 实验 → `multiseed_phase4a_raw_*.npz/png` + `phase4_a_raw_summary.md`；abs 实验 → `multiseed_phase4a_abs_*.npz/png` + `multiseed_phase4a_abs.partial.md`。
+
+**Abs run 代表图**（seed 42, regime_switching）：
+
+![Phase 4A abs regime_switching seed42](results/multiseed_phase4a_abs_regime_switching_seed42.png)
+
+> abs(error) 输入后 detector 仍全程沉默，与 raw run 行为完全等价 —— TabPFN sliding-context 把绝对误差信号也吸收了。
 
 ---
 
@@ -538,6 +564,14 @@ vs Phase 3 v2+B+F：
 | `regime_switching`  | **−0.48** | −2.91 | 0.044 | ✓ sig 负 |
 | `rotating_boundary` | **+0.51** | +2.96 | 0.041 | ✓ sig 正 |
 | `combined_drift`    | **+0.20** | +3.46 | 0.026 | ✓ sig 正 |
+
+**Indicator run 代表图**（seed 42, 两个数据集对比）：
+
+| regime_switching（detector 激活）| rotating_boundary（detector 沉默是设计精神）|
+|---|---|
+| ![Phase 4A indicator regime](results/multiseed_phase4a_indicator_regime_switching_seed42.png) | ![Phase 4A indicator rotating](results/multiseed_phase4a_indicator_rotating_boundary_seed42.png) |
+
+> 左图：indicator detector 在 regime_switching 上**终于触发**（紫点线），active adapter id 在 routing 后切换（下子图）。但 25/25 routes 全是 `create`（cold-start adapter 拖累短期 acc）。右图：rotating 渐进漂移上 detector 0 触发，library 不激活，等价于 Phase 3 机制 —— 这就是 +1.51pp 赢点来源。
 
 #### Verdict
 
@@ -608,6 +642,12 @@ vs indicator：regime +0.37 NS（cold-start 拖累减轻）/ rotating −0.19 NS
 #### 整体定性
 
 **Failure mode 2 with substance**：守门 2 失败 + combined 在四轮中最差。core success condition (combined flip non-negative vs P1) 在四个变体下**全部未达成**（−0.43 / −0.30 / −0.28 / −0.55 pp，全部 sig 负向）。
+
+**Warmstart run 代表图**（seed 42, regime_switching）：
+
+![Phase 4A warmstart regime_switching seed42](results/multiseed_phase4a_warmstart_regime_switching_seed42.png)
+
+> warm-start init + fit_threshold=0.5：detector 触发 + library 扩展到多个 adapter（下子图 active id 切换），但 reuse 仍 0（全 create）。表明 fit_threshold 调宽不足以激活 reuse 路径。
 
 详见 [results/phase4_a_summary_warmstart.md](results/phase4_a_summary_warmstart.md)。
 
@@ -689,6 +729,14 @@ vs Phase 1 baseline：
 vs warmstart（控制变量：random vs warm，fit=0.5 不变）：三数据集**全 NS**（Δ ∈ {0.00, +0.20, +0.08}），random 一致**不差于** warm-start。
 
 vs indicator（控制变量：fit_threshold 0.05→0.5，init=random 不变）：三数据集**全 NS**（Δ ∈ {+0.37, +0.01, −0.19}）。
+
+**fit05random 代表图**（seed 42，最佳赢点 + 最差退步对比）：
+
+| rotating_boundary（+1.52 sig，五轮最佳）| combined_drift（−0.47 NS）|
+|---|---|
+| ![Phase 4A fit05random rotating](results/multiseed_phase4a_fit05random_rotating_boundary_seed42.png) | ![Phase 4A fit05random combined](results/multiseed_phase4a_fit05random_combined_drift_seed42.png) |
+
+> 左图：rotating_boundary 上 detector 0 触发（设计精神），library 不激活，gate 三路权重稳定 → +1.52pp 是 soft 输出门的功劳。右图：combined_drift 上 detector 触发，library 切换 adapter，但 cold-start 拖累让 acc 仍负向。
 
 #### Confound 解耦：完美加性
 
@@ -778,6 +826,14 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 
 **End segment class imbalance**：min/max=0.85（更平衡），未触发"imbalanced metric 失效"风险，y bincount 三段稳定。
 
+**Stage A Electricity 三段 phase4a 代表图**（seed 42）：
+
+| start [0, 5000)  | middle [中段] | end [40k-45k] |
+|---|---|---|
+| ![Stage A start](results/multiseed_phase4a_real_electricity_start_seed42.png) | ![Stage A middle](results/multiseed_phase4a_real_electricity_middle_seed42.png) | ![Stage A end](results/multiseed_phase4a_real_electricity_end_seed42.png) |
+
+> 三段都展示 detector 几乎沉默（紫点线缺席），与合成 rotating 一致 —— gradual covariate drift 不触发 indicator-based detector，Phase 4 library 不激活，退化为 Phase 3 机制。三段 acc 都在 93-97% 区间。
+
 ### Phase 5 Stage B (原 A+ 协议) — **archived**（2026-05-03）
 
 45 runs（3 phases × 3 segments × 5 seeds），2897 min ≈ 48.3h wall。**关键结果**：detector 0/15 触发跨所有 segment。post-hoc 诊断发现 A+ 协议 (start/middle/end) 的 14/15 segments 不含任何 documented drift event：
@@ -787,6 +843,12 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 - end [47848, 52848) — 1 drift @ local 3945 (= absolute 51800)
 
 A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `results/archive_misaligned_stage_b/`，保留 methodology narrative arc（"protocol identification through post-hoc empirical analysis"）。
+
+**Archived 失败案例代表图**（end segment phase4a，唯一含 1 drift 的段）：
+
+![Archived Stage B end](results/archive_misaligned_stage_b/multiseed_phase4a_real_insects_end_seed42.png)
+
+> end segment 是 A+ 协议中唯一含 drift 的段（local t=3945），但 detector 仍未触发 —— 这成为后续 γ 诊断的入口：即便 segment 真有 drift，detector 在 TabPFN-class 系统上仍沉默。完整 archived 数据集（45 npz + 45 png + partial md）在 `results/archive_misaligned_stage_b/`。
 
 ### Phase 5 Stage B B1+ (re-aligned) — 完成（2026-05-29）
 
@@ -815,6 +877,18 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 
 **F4 reuse**：vacuous（0 routes / 0 consolidations / n_adapters=1 全 20 runs）。
 
+**Stage B1+ 四个 drift-aligned segment 代表图**（phase4a, seed 42）：
+
+| early（含 2 drifts）| mid（含 1 drift）|
+|---|---|
+| ![B1+ early](results/multiseed_phase4a_real_insects_early_seed42.png) | ![B1+ mid](results/multiseed_phase4a_real_insects_mid_seed42.png) |
+
+| late_pre（含 1 drift）| late_post（含 1 drift）|
+|---|---|
+| ![B1+ late_pre](results/multiseed_phase4a_real_insects_late_pre_seed42.png) | ![B1+ late_post](results/multiseed_phase4a_real_insects_late_post_seed42.png) |
+
+> 四段每段都有 documented drift 在范围内（紫色 drift 线），但 detector triggers（紫点线）全部缺席，library 全程 adapter 0 → **0/20 触发是 valid 数据点而非协议 artifact**。这是 confound #1 排除后的核心结论，γ 诊断进一步定位机制。
+
 完整数字 + per-segment 分解见 [phase5_real_summary_insects.md](results/phase5_real_summary_insects.md)。
 
 ### Phase 5 — γ Confound #2 Diagnostic（2026-05-29）
@@ -837,6 +911,34 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 **机制定位**：indicator-detector 在 frozen TabPFN + sliding context 系统上对真实 abrupt drift 是 **detector-blind** 的——因为 TabPFN self-adaptation 速度 outpaces ADWIN 检测延迟。合成 regime_switching 上 12/15 触发率是 "by-design independent regimes" 强制慢速 relearn 的 artifact。
 
 12 张 γ 诊断图：`results/phase5_confound2_diag_insects_{seg}_{indicator,pred1,soft_err}.png` × 4×3。
+
+**γ Confound #2 完整 12 张诊断图**（4 segments × 3 信号类型）：
+
+#### Indicator stream — 0/1 错误率（drift 前后 ±200 步滑动均值）
+
+| early | mid | late_pre | late_post |
+|---|---|---|---|
+| ![γ early indicator](results/phase5_confound2_diag_insects_early_indicator.png) | ![γ mid indicator](results/phase5_confound2_diag_insects_mid_indicator.png) | ![γ late_pre indicator](results/phase5_confound2_diag_insects_late_pre_indicator.png) | ![γ late_post indicator](results/phase5_confound2_diag_insects_late_post_indicator.png) |
+
+> **关键观察**：所有 4 段 drift 前后 indicator 均值差 |Δ| ≤ 0.019（vs 合成 0.20，**10× 稀释**）。这是 detector 沉默的直接原因 —— ADWIN 看不到足够 mean shift。
+
+#### Model prediction P(y_pred=1) — TabPFN 输出的 binary class prior
+
+| early | mid | late_pre | late_post |
+|---|---|---|---|
+| ![γ early pred1](results/phase5_confound2_diag_insects_early_pred1.png) | ![γ mid pred1](results/phase5_confound2_diag_insects_mid_pred1.png) | ![γ late_pre pred1](results/phase5_confound2_diag_insects_late_pre_pred1.png) | ![γ late_post pred1](results/phase5_confound2_diag_insects_late_post_pred1.png) |
+
+> **关键观察**：P(y_pred=1) 在 drift 前后**明显 shift 0.03-0.13** —— 模型预测**确实跟着 drift 动了**。问题不在模型"看不到 drift"，而在它"动得太快了"（10-20 步内 in-context relearn 完成）。
+
+#### Raw soft error y_t − y_slow（连续概率域误差）
+
+| early | mid | late_pre | late_post |
+|---|---|---|---|
+| ![γ early soft_err](results/phase5_confound2_diag_insects_early_soft_err.png) | ![γ mid soft_err](results/phase5_confound2_diag_insects_mid_soft_err.png) | ![γ late_pre soft_err](results/phase5_confound2_diag_insects_late_pre_soft_err.png) | ![γ late_post soft_err](results/phase5_confound2_diag_insects_late_post_soft_err.png) |
+
+> **关键观察**：raw error 在 drift 后短暂 spike 后迅速回归 baseline —— 直观看到 TabPFN sliding-context 的快速吸收过程。
+
+**三组图联合解读**：drift 来了 → 模型预测分布 shift（pred1）→ 但 TabPFN 快速 relearn → 误差快速归零（soft_err 短 spike）→ 正确率指标几乎不动（indicator 几乎不变）→ ADWIN 看不到切点 → detector 沉默 → library 不激活 → Design A 机制不启动。**这就是论文核心 mechanistic discovery**。
 
 完整诊断见 [phase5_confound2_diagnostic.md](results/phase5_confound2_diagnostic.md)。
 
