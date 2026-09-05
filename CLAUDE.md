@@ -135,7 +135,8 @@ Orchestrator: `src/models/multi_timescale.py` `MultiTimescaleModel.step(X_ctx, y
   - **γ Confound #2 Diagnostic**: Indicator mean shift |Δ| ≤ 0.019 per drift event (vs synthetic regime_switching 0.20 — **10× signal dilution**). P(y_pred=1) shift 0.03-0.13 (model DOES track drift), but TabPFN's sliding-context in-context relearn (~10-20 steps) absorbs accuracy degradation before indicator stream shifts enough for ADWIN to trigger. **Mechanism**: indicator-detector is *detector-blind* on frozen TabPFN — foundation model self-adaptation outpaces change-point detector delay. Synthetic regime_switching 12/15 triggers is artifact of "by-design independent regimes" forcing slow relearn.
   - **5 paper-grade verdicts (V1-V5)**: V1 F3 fails on real abrupt drift (mechanistic), V2 F4 replicates / vacuous, V3 Phase 3 negative direction replicates, V4 rotating +1pp is synthetic artifact, V5 Phase 4a net negative on real abrupt drift.
   - Full plan + outcome in [phase5_plan.md](phase5_plan.md); combined verdict in [results/phase5_real_summary.md](results/phase5_real_summary.md); γ diagnostic in [results/phase5_confound2_diagnostic.md](results/phase5_confound2_diagnostic.md).
-- **Phase 6** (paper writing): 🚧 待启动. **Framing upgraded** from "negative-result methodology" to **"mechanistic discovery + methodology contribution"** based on Phase 5 γ diagnostic finding (TabPFN absorption mechanism quantified). Title candidate: *"When Foundation Models Outrun Drift Detectors: A Mechanistic Study of Adaptation-Detection Mismatch in TabPFN"*. Primary deliverable: 毕业论文 (含 Phase 2/2.5 appendix, 中文+英文摘要, ~10 章). Title drops "PFC", uses "Multi-Timescale / Hierarchical" ML terminology. CPU only, no algorithm overhaul needed, negative+mechanistic framing. β binarization ablation NOT done — γ diagnostic already mechanistically explains F3 failure (TabPFN absorption, not binarization), β would be redundant. Estimated drafting 2-3 weeks.
+- **Phase 5.5** (advisor-directed detector redesign): 🚧 **当前主线，待启动**. 2026-06-01 导师汇报后确定的方向。核心诊断：真实数据上 detector 几乎不触发（Electricity 1/15, Insects 0/20）→ 三层结构从未被激活 → "方法无效" 这个结论其实**从未被真正验证过**。导师认为算法本身可能可行，是 detector 把它拦截了。三个方向（导师说"平行"）：**路径 A** 用 "滑窗=0 不适应" vs "滑窗=300 适应" 两路预测的差值作为 detector 输入；**路径 B** 提高 `fixed_ratio` 让误差信号不被自适应吃掉；**维度 C** 用早期 regime 留出数据回测，做 adaptation-vs-forgetting trade-off（导师点名最可能出正面结果）。新实验**直接在真实数据上跑**，不必先过合成。技术规格见 [todo.md](todo.md) P1。
+- **Phase 6** (paper writing): 阻塞于 Phase 5.5. 目标已从"期刊投稿"降级为**完成 KTH 硕士答辩（pass 即可）**，时间不紧张。**⚠️ framing 已修正**：此前文档把 "mechanistic discovery — foundation models outrun drift detectors" 当作论文核心 contribution，该定位在 2026-06-01 被导师否定（原话："答辩的时候比较容易被质疑…不太稳，还是得有一些正面的"）。负面结果**保留但降级**为方法演进的中间步骤/附录，不作卖点；论文主线取决于 Phase 5.5 能否拿到正面结果。标题去 "PFC" 用 Multi-Timescale / Hierarchical 术语；Ch2.3 保留半页生物灵感但明确不声称生物建模；Phase 2/2.5 进 Appendix A。
 
 ### Synthetic Datasets
 
@@ -151,6 +152,8 @@ All three generators produce `SyntheticDataset(X, y, regime_labels, drift_points
 
 ## Key Documents
 
+- **`start_prompt.md` — 项目入口，任何 AI 接手先读这个**（定位/目标/方向说明/不要做的事）
+- **`todo.md` — 待办清单 + Phase 5.5 实验技术规格**
 - `progress_report.md` — full experimental narrative (Phase 1 → Phase 5 Combined Verdict + Phase 6 stub)
 - `phase4_plan.md` — Phase 4 plan (Cheap Diagnostic + Decision branch + Design A spec)
 - `phase5_plan.md` — Phase 5 plan + Phase 4 Day 2 cleanup + Phase 6 (paper) outline ← Phase 5 已完成
@@ -159,6 +162,7 @@ All three generators produce `SyntheticDataset(X, y, regime_labels, drift_points
 - `results/phase5_real_summary.md` — **Phase 5 combined verdict (Stage A + B1+ + γ)** ← Phase 6 写作起点
 - `results/phase5_real_summary_electricity.md` / `phase5_real_summary_insects.md` — Stage A / B1+ 各自详细数字
 - `results/phase5_confound2_diagnostic.md` — γ 诊断 + TabPFN absorption 机制定位
+- `6_1和导师汇报的录音_包含两份转写.txt` — **2026-06-01 导师反馈原始转写**（已 gitignore，私人文件；以 GPT-6 Astra 那份为准，讯飞听见那份专业名词不准）
 - `results/archive_misaligned_stage_b/README.md` — 旧 A+ misaligned Stage B 数据归档说明（保留 methodology narrative arc）
 
 > 本地另有几个 stage-level / dev-infra 文档（intermediate phase summaries、`.claude/` workspace、`idea_difference.md`、`claude-code-workflow-setup.md`、`3_11建议与改进.md` 等）未推送到 GitHub —— 内容已被 `progress_report.md` 完整 supersede 或与论文无关，本地保留作开发参考；详见 `.gitignore`。

@@ -41,6 +41,14 @@ idea_difference.md
 # Advisor's private PDF (not for public upload)
 *.pdf
 
+# Personal advisor demo scripts (private notes)
+advisor_demo_*.md
+
+# Advisor meeting recordings / transcripts (private — never push to public repo)
+*录音*
+*转写*
+*.txt
+
 # Jupyter checkpoints
 .ipynb_checkpoints/
 
@@ -53,3 +61,7 @@ logs/
 # IDE
 .vscode/
 .idea/
+
+# Phase 5 smoke-test residue (no paper value)
+results/smoke/
+results/smoke_oracle.png

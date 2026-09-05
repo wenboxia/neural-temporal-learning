@@ -237,6 +237,15 @@ ETA: ~45h CPU，分 2-3 天跑完
 
 ## 7. Phase 6 — 论文撰写（Phase 5 完成后启动）
 
+> ⚠️ **本节（§7 论文大纲 + §8 时间预估）已过时，不要直接使用。**
+> - §7.1 的标题 *"A Negative-Result Methodology Study"* 与章节列表是 Phase 5 之前的版本，
+>   其"负面结果 methodology paper"定位已于 2026-06-01 被导师否定
+> - §8 的时间预估已失效（Phase 5 实际耗时 ~132h CPU，远超表中的 45h）
+> - 目标已从"期刊投稿"降级为 **KTH 硕士答辩 pass**
+>
+> **当前有效的规划见 [todo.md](todo.md)**；方向纠正的完整记录见
+> [progress_report.md](progress_report.md) §「2026-06-01 导师汇报反馈」。
+
 ### 7.1 论文结构（10 章）
 
 详细大纲见 [results/phase4_final_verdict.md](results/phase4_final_verdict.md) §"论文章节大纲建议"，本计划列**调整后**版本：

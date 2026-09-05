@@ -1,5 +1,13 @@
 # Phase 5 — Real-World Validation Combined Verdict
 
+> ⚠️ **framing 说明（2026-06-01 导师汇报后追加）**
+> 本节的**实验数据、统计结论、γ 诊断的事实内容全部有效**。
+> 被取代的只是把这些负面结果定位为"论文核心 contribution / mechanistic discovery"这一点 ——
+> 该定位已被导师否定，详见 [../progress_report.md](../progress_report.md) §「2026-06-01 导师汇报反馈」。
+> 关键推论：detector 从未触发 ⇒ 三层结构未被激活 ⇒ **"方法无效"这个结论其实从未被真正验证过**。
+> 当前主线是 Phase 5.5（重设计 detector 信号），见 [../todo.md](../todo.md) P1。
+
+
 **完成日期**：2026-05-29
 **实验体量**：Electricity (Stage A, A+ 协议) 45 runs + Insects (Stage B1+ aligned 协议) 60 runs = **105 real-world runs** + 45 archived 原 A+ Insects runs（methodology narrative 保留）
 **Wall time**：Stage A 24.1h + Stage B 48.3h (archived) + Stage B1+ 60.1h = **~132h CPU**

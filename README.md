@@ -2,8 +2,11 @@
 
 在**冻结的 TabPFN**（pre-trained tabular foundation model）之上构建多时间尺度（slow / inter / fast）adapter library 系统，应对表格数据的概念漂移问题。受前额叶皮层（PFC）多时间尺度结构启发，但因 TabPFN 权重不可微调（CPU only + 防 catastrophic forgetting），不声称生物建模。
 
-**项目状态**：Phase 1-5 完成 → Phase 6 毕业论文撰写待启动
-**最后更新**：2026-05-31
+**项目状态**：Phase 1-5 完成 → **Phase 5.5（导师指定的 detector 重设计）进行中** → Phase 6 毕业论文
+**目标**：完成 KTH 硕士毕业论文答辩
+**最后更新**：2026-09-05
+
+> 🔎 **接手这个项目？先读 [`start_prompt.md`](start_prompt.md)**，待办见 [`todo.md`](todo.md)。
 
 ---
 
@@ -19,7 +22,8 @@
 | Phase 4 Day 1.5 | ✅ | 4-stage detector input ablation | raw/abs/indicator/warmstart |
 | Phase 4 Day 2 | ✅ | 2×2 confound 解耦 (fit_threshold × init) | fit_threshold 主因 70% |
 | **Phase 5** | ✅ | **真实数据验证** (Electricity + Insects abrupt) | **5 个 paper-grade verdicts** |
-| Phase 6 | 🚧 待启动 | 毕业论文撰写 | Title: *"When Foundation Models Outrun Drift Detectors..."* |
+| **Phase 5.5** | 🚧 **进行中** | **导师指定的 detector 重设计**（对比信号 / fixed_ratio / 遗忘 trade-off） | 待产出 |
+| Phase 6 | ⏸ 阻塞于 5.5 | 毕业论文撰写（KTH 硕士，目标 pass） | 论文主线取决于 5.5 结果 |
 
 ---
 
@@ -49,11 +53,25 @@ vs 合成 regime_switching 0.20
 
 **机制**：TabPFN 的 sliding context window 在 ~10-20 步内通过 in-context learning 吸收掉 P(y) shift，预测准确率几乎不变 → indicator stream 没有明显切点 → ADWIN change-point detector 无法触发。
 
-**论文 framing 升级**：从"negative-result methodology"升级为"**mechanistic discovery + methodology contribution**"——这是一个 fundamental property discovery（foundation model self-adaptation 速度 outpaces change-point detector delay），不只是"方法失败"。
+> ⚠️ **framing 已修正（2026-06-01 导师汇报后）**
+>
+> 上面这条机制定位**曾被当作论文核心 contribution**（"foundation models outrun drift detectors"），该定位**已被导师否定**：
+>
+> > "这个答辩的时候比较容易被质疑，我觉得这个不太好，还是不太稳。还是得有一些正面的，我们还是按照正面来推进。"
+>
+> 导师的诊断是：detector 不触发是**设计问题**而非根本性质 —— "算法本身应该是可行的，只不过你的检测器把它拦截下来了"。
+> 由于 detector 从未触发，三层结构根本没被激活，**"方法无效" 这个结论其实从未被真正验证过**。
+>
+> **γ 诊断的实验数据与统计结论全部有效**，被取代的只是"这是论文核心发现"这个定位。
+> 当前主线是 Phase 5.5：重新设计 detector 信号让它触发起来，再验证方法的真实效果。详见 [`todo.md`](todo.md) P1。
 
 ---
 
 ## 文件指引
+
+### 入口
+- [**`start_prompt.md`**](start_prompt.md) — **项目交接入口**：定位 / 目标 / 方向说明 / 不要做的事
+- [**`todo.md`**](todo.md) — 待办清单 + Phase 5.5 实验技术规格
 
 ### 核心叙事
 - [`progress_report.md`](progress_report.md) — **完整实验 narrative**（Phase 1 → Phase 5 Combined Verdict + Phase 6 stub），含所有实验结果图
@@ -124,8 +142,8 @@ python scripts/run_baselines.py --dataset regime_switching --n_samples 3000 --co
 # Phase 4 A（per-regime adapter library + ADWIN routing）
 python scripts/run_phase4_a.py --dataset regime_switching --n_samples 3000
 
-# Phase 5 真实数据（Electricity）
-python scripts/run_phase4_a.py --dataset_source real --datasets electricity --segment_id start
+# Phase 5 真实数据（Electricity）—— 注意单次运行脚本用 --dataset（单数）
+python scripts/run_phase4_a.py --dataset electricity --dataset_source real --segment_id start
 
 # 完整 multi-seed 批量
 python scripts/run_multiseed.py --dataset_source real --datasets insects \
