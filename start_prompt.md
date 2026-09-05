@@ -61,20 +61,73 @@
 | **Prequential 协议** | 先预测 → 观测真实标签 → 更新。**绝不能偷看未来标签** |
 | **归一化不能泄漏** | 真实数据的 StandardScaler 只 fit 前 200 个样本，再 transform 全段 |
 
-## 4. 进度总览：Phase 1–5 已完成
+### 融合与训练细节
 
-| Phase | 状态 | 一句话结论 |
+- **residual-additive 融合**：`y_inter` 和 `correction` 是加在 `y_slow` 上的残差；gate 三路权重经 softmax 和为 1，但 `α` 实际未被使用（保留作向后兼容/可视化）。`y_final` 最后 clip 到 [0,1]
+- **per-step 训练**：每个 prequential 步用 `MSE(y_final, y_t)` 更新 **gate**；**adapter 只在 consolidation 时**才拿到梯度（Phase 3 F 改动，gate/adapter 优化器分离）
+- **consolidation 触发**：Phase 3 用 `|mean(buffer.errors[-window:])| > threshold` + cooldown；Phase 4 A 改为纯 **ADWIN detector 驱动**（routing → consolidate active adapter）
+
+### 模块地图
+
+| 文件 | 职责 | 关键 API |
 |---|---|---|
-| Phase 1 | ✅ | TabPFN baseline，79.89 ± 0.99% (regime_switching, n=5) |
-| Phase 2 | ✅ | + FastCorrector (KNN/EMA)，三数据集全 NS（无显著改善） |
-| Phase 2.5 | ✅ | 类别平衡修复 + CompositeWindowLoader；适应速度 126→62 步，但总体准确率掉 2.5pp |
-| Phase 3 | ✅ | + GatedEnsemble + 巩固；rotating +1.00 sig / regime NS / combined −0.47 sig 负。**关键发现：gate 的 β ≈ 0**，共享 adapter 跨 regime 无可迁移模式 |
-| Phase 4 Day 0.5 | ✅ | Oracle context-reset +0.51pp sig → context 污染只占损失的 ~1/3 |
-| Phase 4 Day 1.5 | ✅ | 四段 detector 输入 ablation：raw 0/15 触发、abs 0/15、**indicator 12/15**、warmstart 12/15 |
-| Phase 4 Day 2 | ✅ | 2×2 析因解耦：fit_threshold 主因 70%、init_strategy 次因 30%、完美加性 |
-| Phase 5 | ✅ | 真实数据验证（Electricity + Insects），共 105 runs / ~132h CPU。**detector 在真实数据上几乎不触发**（Electricity 1/15、Insects 0/20），phase4a 相对 baseline 无改善甚至微负 |
+| `src/data/synthetic.py` | 3 个合成漂移生成器 | `make_dataset(name, **kw) → SyntheticDataset` |
+| `src/data/real_world.py` | Electricity / Insects 加载 + 二值化 + 无泄漏归一化 | `load_real_world(name, segment_id, insects_aligned=False)` |
+| `src/data/temporal_loader.py` | 滑动窗口 / 组合窗口（固定池+滑窗） | `TemporalWindowLoader`, `CompositeWindowLoader(fixed_ratio=)` |
+| `src/models/slow_prior.py` | **Level 1**：冻结 TabPFN 包装器，懒加载权重 | `predict(X_ctx, y_ctx, X_query)` — **无状态，context 显式传入** |
+| `src/memory/buffer.py` | FIFO 工作记忆，存 `(x, error, embedding)` | `recent_errors(n)` / KNN / EMA 查询 |
+| `src/models/fast_corrector.py` | **Level 3**：KNN/EMA 残差校正，零可学习参数 | `correct(x)`, `should_consolidate(window, threshold)` |
+| `src/models/gated_ensemble.py` | **Level 2**：gate(MLP→softmax 三路) + adapter(MLP 残差) | `forward(x, y_slow, correction) → (y_final_raw, weights)` |
+| `src/consolidation/fast_to_inter.py` | 快→中巩固：把 buffer 误差 MSE 蒸馏进 adapter | `consolidate(...)`，结束后清空 buffer |
+| `src/drift/error_detector.py` | ADWIN 变点检测（1D 误差流） | `update(value) → bool`, `clear()` |
+| `src/regime/adapter_library.py` | Per-regime adapter 库（`nn.ModuleDict`）+ 硬路由 | `route(...)`, `active_optimizer()` |
+| `src/models/multi_timescale.py` | **编排器**，三层串起来 | `step(X_ctx, y_ctx, x_t, y_t, t)` — **detector 输入硬编码在 ~L304** |
+| `src/utils/metrics.py` | 评估指标 | `summarize_results()`, `window_accuracy()`, balanced acc, AUC |
 
-完整叙事见 [`progress_report.md`](progress_report.md)（63KB，含全部实验图）。
+脚本：`run_baselines.py`(P1) / `run_phase2.py` / `run_phase3.py` / `run_phase4_a.py` / `run_multiseed.py`(批量驱动)。
+测试：`tests/` 9 个文件，**105 passed**。
+
+### 数据集清单
+
+**合成**（`src/data/synthetic.py`，全部二分类、类别平衡）：
+
+| 数据集 | 漂移类型 | 机制 |
+|---|---|---|
+| `rotating_boundary` | 渐进 | 2D 高斯特征，线性决策边界以 `drift_speed=0.003` rad/步旋转 |
+| `regime_switching` | 突发 | 循环 `n_regimes=3` 个体制，**每个体制特征均值和决策权重互相独立**（by design 无可迁移模式），每段 `regime_length=500` |
+| `combined_drift` | 混合 | 前 5 维特征全程线性漂移 2σ + 决策边界每 3000 步突变 |
+
+**真实**（`src/data/real_world.py`）：
+
+| 数据集 | 来源 | 规模 | 漂移 | 注意 |
+|---|---|---|---|---|
+| Electricity | OpenML id=151 | 45,312 × 8 特征（one-hot 后 14 维） | 渐进 / 季节性，无 crisp 切点 | 时序按 (date, period) 已排序；target UP/DOWN → 1/0 |
+| Insects | USP DS `abrupt_balanced`（Google Drive，river master 的直链；river 0.23 内置 URL 已 404） | 52,848 × 33 特征 | **突发**，5 个 documented drift @ 12,672 / 14,256 / 17,952 / 46,728 / 52,008 | 原始 **6 类**，按 sex-pair 二值化 `{2,4,11}→0` vs `{3,5,12}→1`（物种映射查不到，Limitations 需写明） |
+
+**Insects B1+ drift-aligned 四段**（当前使用的切法，覆盖全 5/5 drift）：
+`early [10000,15000)` / `mid [16000,21000)` / `late_pre [42500,47500)` / `late_post [47848,52848)`，互不重叠，每个 drift 距段边界 ≥ 744 样本（满足 ADWIN 缓冲）。
+
+## 4. 项目履历：从头到尾做了什么
+
+> 一行一个阶段太薄了，这里按「做了什么 / 结论 / 踩过的坑」三列写。
+> **完整叙事（含全部数字和实验图）见 [`progress_report.md`](progress_report.md)（1083 行）。**
+
+| 阶段 | 做了什么 | 结论 | 踩过的坑 / 教训 |
+|---|---|---|---|
+| **Phase 1** | 冻结 TabPFN 滑动窗口 baseline，三数据集 multi-seed | 79.89 ± 0.99% (regime_switching)；漂移后掉 12–13pp，需 ~61 步恢复 | 确立了"TabPFN 对漂移脆弱"这个动机 |
+| **Phase 2** | + Level 3 FastCorrector（KNN / EMA 残差校正） | **三数据集全 NS**，无显著改善 | 单 seed 曾报 "82.5% best"，其实在噪声内。→ 进论文 Appendix A |
+| **Phase 2.5** | 导师 2026-03-11 反馈四条：①类别平衡修复（体制内曾 86:14）②多数据集 Phase 2 ③`CompositeWindowLoader`（固定池+滑窗）④补 balanced acc / AUC | 组合窗口把适应速度 126→62 步，**但总体准确率掉 2.5pp**（fr=0.67）；fr=0.93 时掉 11pp | **适应速度与总体准确率无法两全** —— 这个权衡在 Phase 5.5 路径 B 会再次出现 |
+| **Phase 3** | + Level 2 GatedEnsemble（三路 softmax 门控）+ Fast→Inter 巩固；做了 4-way ablation + **三轮架构迭代**（v2 残差融合 / B 松触发 / F 分离优化器+cooldown） | rotating **+1.00 sig** / regime −0.18 **NS** / combined **−0.47 sig 负** | ⚠️ **单 seed 误判教训**：初期单 seed 报 regime_switching "−4.5pp 灾难"，multi-seed (n=5) 重跑归零为 −0.18 NS，纯抽样噪声。**此后所有结论一律 n=5 paired t-test**<br>🔑 **核心发现**：gate 的 **β ≈ 0** 跨全部数据集 —— 共享 adapter 跨 regime 无可迁移模式，gate 理性地忽略它。这是 Phase 4 走 per-regime 隔离的动机 |
+| **外部 cross-review** | 4 家 LLM 独立评审当时的结论 | 共识指出 multi-seed 是必须补的方法学要求 | 若不补，后续论文会基于错误数字做错误叙事 |
+| **Phase 4 Day 0.5** | Oracle context-reset：漂移后强制把 context 截断到最近 50 样本（模拟"完美 detector"） | **+0.51pp sig** (paired t=+3.25) | **context 污染只占损失的 ~1/3**，剩下 2/3 是新体制样本不足。→ 决定走 Design A 而非只做 context-reset |
+| **Phase 4 Day 1.5** | 实施 Design A（ADWIN + per-regime AdapterLibrary + 硬路由），做 **4 轮 detector 输入 ablation** | raw error **0/15 触发**、\|error\| **0/15**、**0/1 indicator 12/15**、warmstart 12/15 | 🔑 raw error 在类别平衡数据上 mean ≈ 0，ADWIN 结构性看不到；\|error\| 被 TabPFN 自适应消化。**只有硬离散信号能绕过自适应**<br>⚠️ 但 25/25 routing 全是 `create`，**reuse 路径从未激活** |
+| **Phase 4 Day 2** | 补 2×2 析因缺失格（fit_threshold=0.5 × random init） | fit_threshold 主因 **70%**、init_strategy 次因 **30%**、**完美加性无交互** | ⚠️ **overclaim 修正教训**：Day 1.5 写的"warm-start 是 anti-pattern"是过强表述，Day 2 数据显示它只是 secondary factor (<0.1pp)。诚实修正写进方法学 |
+| **Phase 5 Stage A** | Electricity 45 runs（A+ 协议 start/middle/end × 5 seeds × 3 phases），~24h | phase4a vs P1 **−0.064 NS**；detector **1/15**；F4 reuse 复现（1/1 全 create） | 渐进漂移上 detector 沉默符合设计精神（同合成 rotating 0/15）；但合成 rotating 的 +1pp 增益**没迁移过来** |
+| **Phase 5 Stage B**（已归档） | Insects 同样用 A+ 三段协议，45 runs，~48h | detector **0/15** | ⚠️⚠️ **最大的坑**：事后诊断发现 A+ 的三段里 **14/15 段根本不含任何 documented drift**（5 个 drift 全在切片窗口外）。这个 0/15 是 trivially correct，**结论无效，45 个 run 白跑**。数据归档在 `results/archive_misaligned_stage_b/`<br>👉 **教训：切片前必须先定位 drift 位置** |
+| **Phase 5 Stage B1+** | 重设计为 4 个 drift-aligned 段覆盖全 5/5 drift，60 runs，~60h | detector **仍 0/20**（此时是 valid 数据点）；phase4a vs P1 **−0.172 sig p<0.0001**；3/4 段单独也 sig 负 | 协议层面的解释被排除 → 逼出下面的 γ 诊断 |
+| **Phase 5 γ 诊断** | 对每个 drift 前后 ±200 步分析三种信号（12 张图） | indicator \|Δ\| **≤ 0.019**（合成是 0.20，**10× 稀释**）；但 P(y_pred=1) shift 有 0.03–0.13 | 🔑 模型**确实**跟着漂移动了，只是 TabPFN 在 ~10–20 步内就把 P(y) shift 吸收掉，错误率几乎不抬升，ADWIN 看不到切点 |
+| **2026-06-01 导师汇报** | 汇报全部进展 + 4 个 framing 偏差 | **否定了把上述负面结果当论文卖点**；指出 detector 不触发是设计问题，给了三条补救路径 | 见 §5 —— **这是当前方向的依据** |
+| **Phase 5.5** | 🚧 待启动：路径 A 对比信号 / 路径 B fixed_ratio / 维度 C 遗忘 trade-off | — | 规格见 [`todo.md`](todo.md) P1 |
 
 ---
 
