@@ -67,6 +67,40 @@ _INSECTS_CSV_FEATURE_COLS = [f"f{i}" for i in range(1, 34)]
 # 因此这只能称 "ID 分组 (pair parity)"，不能称 sex 分类；论文 Limitations 须写明。
 _INSECTS_BINARIZE_MAP = {2: 0, 4: 0, 11: 0, 3: 1, 5: 1, 12: 1}
 
+# Phase 5.5：可选的标签方案。
+#   pair_parity  —— 既有方案，全部 6 类按奇偶折叠成 2 类，保留全部 52,848 行。
+#                   问题：TabPFN 在这上面能到 96–98%，只剩 2–4pp headroom，
+#                   而 adapter cold-start 的固定成本就有 0.17pp ⇒ 设计上出不了正面结果。
+#   pair_A_vs_B  —— 只保留 {2,3} 与 {4,5} 两组，丢弃 {11,12}；标签 = 属于哪一组。
+#                   任务更难（官方点 33,240 处 TabPFN 探针 99% → 62%），代价是丢约 1/3 样本，
+#                   且被丢的那对类的"消失-重现"现象也随之消失。
+# ⚠️ 两者都只是 **ID 分组**，没有官方语义（见上方 _INSECTS_BINARIZE_MAP 注释）。
+_INSECTS_LABEL_SCHEMES = {
+    "pair_parity": {"keep": None, "positive": {3, 5, 12}},
+    "pair_A_vs_B": {"keep": {2, 3, 4, 5}, "positive": {4, 5}},
+}
+
+
+def _binarize_insects(raw: np.ndarray, label_scheme: str) -> "tuple[np.ndarray, np.ndarray]":
+    """把原始 6 类 ID 折成 0/1，并返回保留行的布尔掩码。
+
+    Returns:
+        y:    (n_kept,) int64，0/1 标签
+        keep: (n,) bool，哪些原始行被保留（pair_parity 全 True）
+    """
+    if label_scheme not in _INSECTS_LABEL_SCHEMES:
+        raise ValueError(
+            f"label_scheme 必须 ∈ {sorted(_INSECTS_LABEL_SCHEMES)}，收到 {label_scheme!r}"
+        )
+    spec = _INSECTS_LABEL_SCHEMES[label_scheme]
+    keep = (
+        np.ones(len(raw), dtype=bool)
+        if spec["keep"] is None
+        else np.isin(raw, sorted(spec["keep"]))
+    )
+    y = np.isin(raw[keep], sorted(spec["positive"])).astype(np.int64)
+    return y, keep
+
 # ── 漂移坐标：官方 vs 经验推断（Phase 5.5 更正，2026-09-06）────────────────────
 #
 # 官方坐标（Souza et al. 2020, Table 2, "Abrupt (bal.)", 52,848 instances）。
@@ -98,6 +132,22 @@ _INSECTS_ALIGNED_BOUNDS = {
     "late_post": (47_848, 52_848),  # 经验点 52,008；无官方漂移
 }
 _INSECTS_ALIGNED_SEGMENTS = list(_INSECTS_ALIGNED_BOUNDS.keys())
+
+# Phase 5.5 新切法（`aligned_v2`）：以**官方**变点为中心的 5 个不重叠段。
+# 设计要点：
+#   - 每段 3000 样本，官方变点大致居中（旧 B1+ 有几段把 drift 挤在末尾，
+#     漂移后只剩几百步，恢复曲线根本画不完）；
+#   - 变点距段两端 ≥ 1000 步，够 ADWIN 累积窗口 + 够观察恢复；
+#   - 38,682 与 39,510 只差 828 步，放同一段（`d4_double`）而不是拆开。
+# 段名用 dN 前缀标出它对齐的是哪个官方变点。
+_INSECTS_ALIGNED_V2_BOUNDS = {
+    "d1_14352":   (12_900, 15_900),   # 官方 14,352 → local 1,452
+    "d2_19500":   (18_000, 21_000),   # 官方 19,500 → local 1,500
+    "d3_33240":   (31_700, 34_700),   # 官方 33,240 → local 1,540
+    "d4_double":  (37_600, 40_600),   # 官方 38,682 / 39,510 → local 1,082 / 1,910
+    "d0_control": (25_000, 28_000),   # 无官方变点的对照段（测误报率）
+}
+_INSECTS_ALIGNED_V2_SEGMENTS = list(_INSECTS_ALIGNED_V2_BOUNDS.keys())
 
 
 def _ensure_insects_csv(variant: str = "abrupt_balanced") -> str:
@@ -151,59 +201,108 @@ def load_insects(
     size: int = 5000,
     variant: str = "abrupt_balanced",
     insects_aligned: bool = False,
+    aligned_v2: bool = False,
+    label_scheme: str = "pair_parity",
 ) -> RealWorldDataset:
     """加载 Insects 二值化 segment。
 
-    insects_aligned=False (default): segment_id ∈ {start, middle, end}, size 任意 ≤ N
-    insects_aligned=True (Phase 5 B1+): segment_id ∈ {early, mid, late_pre, late_post}，
-      bounds 由 `_INSECTS_ALIGNED_BOUNDS` 硬编码（覆盖全 5/5 drift），size 参数被忽略
-      （4 段都固定 5000 samples）。
+    三种切法：
+      - 默认 (A+)：segment_id ∈ {start, middle, end}，size 任意 ≤ N。
+        ⚠️ 14/15 段不含任何漂移，Phase 5 已归档，勿用于新实验。
+      - insects_aligned=True (B1+)：segment_id ∈ {early, mid, late_pre, late_post}。
+        按**经验 P(y) 变化点**对齐，按官方坐标只覆盖 2/5 个真实漂移。保留以复现既有 60 runs。
+      - aligned_v2=True (Phase 5.5)：segment_id ∈ `_INSECTS_ALIGNED_V2_SEGMENTS`。
+        以**官方**变点为中心，每段 3000 样本、变点距两端 ≥ 1000 步，另含一个无漂移对照段。
+
+    label_scheme ∈ {"pair_parity"（默认，全 6 类折叠）, "pair_A_vs_B"（只留 {2,3} vs {4,5}）}。
+    非 pair_parity 时会**丢行**，因此 drift 的段内坐标必须在过滤后重新映射 —— 见下方实现。
     """
+    if insects_aligned and aligned_v2:
+        raise ValueError("insects_aligned 与 aligned_v2 互斥，只能选一种切法")
+
     csv_path = _ensure_insects_csv(variant=variant)
     cols = _INSECTS_CSV_FEATURE_COLS + ["class"]
     df = pd.read_csv(csv_path, header=None, names=cols)
 
-    # 二值化：class IDs → 0/1 sex-pair binarization
-    unknown = set(df["class"].unique()) - set(_INSECTS_BINARIZE_MAP.keys())
+    raw_full = df["class"].to_numpy()
+    unknown = set(np.unique(raw_full)) - set(_INSECTS_BINARIZE_MAP.keys())
     if unknown:
         raise RuntimeError(
             f"Unexpected Insects class IDs {unknown}; "
-            f"binarization map covers only {sorted(_INSECTS_BINARIZE_MAP)}"
+            f"known IDs are {sorted(_INSECTS_BINARIZE_MAP)}"
         )
-    y_full = df["class"].map(_INSECTS_BINARIZE_MAP).to_numpy(dtype=np.int64)
     X_full = df[_INSECTS_CSV_FEATURE_COLS].to_numpy(dtype=np.float32)
 
-    if insects_aligned:
+    # ── 选段边界 + 该段对应的漂移坐标（绝对） ─────────────────────────
+    if aligned_v2:
+        if segment_id not in _INSECTS_ALIGNED_V2_BOUNDS:
+            raise ValueError(
+                f"aligned_v2=True requires segment_id ∈ "
+                f"{_INSECTS_ALIGNED_V2_SEGMENTS}, got {segment_id!r}"
+            )
+        seg_start, seg_end = _INSECTS_ALIGNED_V2_BOUNDS[segment_id]
+        drift_abs = _INSECTS_OFFICIAL_DRIFT_POINTS      # 官方温度变点
+        suffix = "v2_"
+    elif insects_aligned:
         if segment_id not in _INSECTS_ALIGNED_BOUNDS:
             raise ValueError(
                 f"insects_aligned=True requires segment_id ∈ "
                 f"{_INSECTS_ALIGNED_SEGMENTS}, got {segment_id!r}"
             )
         seg_start, seg_end = _INSECTS_ALIGNED_BOUNDS[segment_id]
-        X_seg = X_full[seg_start:seg_end].copy()
-        y_seg = y_full[seg_start:seg_end].copy()
+        drift_abs = _INSECTS_EMPIRICAL_PY_SHIFT_POINTS  # 复现既有 runs
+        suffix = "aligned_"
     else:
         if segment_id not in {"start", "middle", "end"}:
             raise ValueError(
                 f"insects_aligned=False requires segment_id ∈ "
                 f"{{start, middle, end}}, got {segment_id!r}"
             )
-        X_seg, y_seg = take_segment(X_full, y_full, segment_id=segment_id, size=size)
         seg_start, seg_end = _segment_bounds(len(X_full), segment_id, size)
+        drift_abs = _INSECTS_EMPIRICAL_PY_SHIFT_POINTS
+        suffix = ""
+
+    X_seg_raw = X_full[seg_start:seg_end]
+    raw_seg = raw_full[seg_start:seg_end]
+
+    # ── 二值化 + 行过滤 + 漂移坐标重映射 ──────────────────────────────
+    # ⚠️ 关键正确性点：label_scheme 丢行后，段内漂移坐标必须按**保留行的累计数**
+    # 重新映射，否则 oracle 触发时刻会指向错误的样本（勘察指出的 D+E 交互问题）。
+    y_seg, keep = _binarize_insects(raw_seg, label_scheme)
+    X_seg = X_seg_raw[keep].copy()
+    kept_cumsum = np.cumsum(keep)          # kept_cumsum[i] = 前 i+1 行中保留了几行
+    local_drift = []
+    for d in drift_abs:
+        if not (seg_start < d < seg_end):
+            continue
+        d_local_raw = int(d - seg_start)
+        d_local = int(kept_cumsum[d_local_raw - 1]) if d_local_raw > 0 else 0
+        local_drift.append(d_local)
+
+    # 过滤后段可能明显变短（例如 d2_19500 在 pair_A_vs_B 下 3000 → 1474，
+    # 因为该时段以 {11,12} 为主）。**原始时间窗保持不变**，两种 label_scheme 因此
+    # 覆盖同一段时间、只是任务不同，可比；但太短的段没有观察恢复的余地，直接报错。
+    _MIN_SEG_ROWS = 1000
+    if len(X_seg) < _MIN_SEG_ROWS:
+        raise ValueError(
+            f"segment {segment_id!r} 在 label_scheme={label_scheme!r} 下只剩 "
+            f"{len(X_seg)} 行（原始窗 {seg_end - seg_start}），少于 {_MIN_SEG_ROWS}，"
+            "不足以观察漂移后的恢复。请换段或换 label_scheme。"
+        )
+    if local_drift and min(local_drift) < 200:
+        raise ValueError(
+            f"segment {segment_id!r} 在 label_scheme={label_scheme!r} 下漂移点 "
+            f"{local_drift} 距段首不足 200（context_size），漂移会落在 warm-up 里。"
+        )
 
     X_seg = _prequential_normalize(X_seg, fit_size=200)
 
-    local_drift = [
-        int(d - seg_start)
-        for d in _INSECTS_DRIFT_POINTS_HINT
-        if seg_start < d < seg_end
-    ]
-    suffix = "aligned_" if insects_aligned else ""
+    scheme_tag = "" if label_scheme == "pair_parity" else f"{label_scheme}_"
     return RealWorldDataset(
         X=X_seg,
         y=y_seg,
         drift_points=local_drift,
-        name=f"insects_{variant}_{suffix}{segment_id}",
+        name=f"insects_{variant}_{scheme_tag}{suffix}{segment_id}",
     )
 
 
@@ -303,15 +402,17 @@ def _prequential_normalize(X: np.ndarray, fit_size: int = 200) -> np.ndarray:
 
 def load_real_world(
     name: str, segment_id: str = "start", size: int = 5000,
-    insects_aligned: bool = False, **kwargs,
+    insects_aligned: bool = False, aligned_v2: bool = False,
+    label_scheme: str = "pair_parity", **kwargs,
 ) -> RealWorldDataset:
     """
     name ∈ {"electricity", "insects"};
-    segment_id ∈ {"start", "middle", "end"} 或 (insects_aligned=True 时)
-                  {"early", "mid", "late_pre", "late_post"}.
+    segment_id ∈ {"start", "middle", "end"}，或 insects_aligned=True 时
+                  {"early", "mid", "late_pre", "late_post"}，
+                  或 aligned_v2=True 时 `_INSECTS_ALIGNED_V2_SEGMENTS`。
 
     Insects 当前固定 variant="abrupt_balanced"（Phase 5 §决策），可由 kwargs 传入覆盖。
-    insects_aligned 仅对 Insects 生效，Electricity 忽略。
+    insects_aligned / aligned_v2 / label_scheme 仅对 Insects 生效，Electricity 忽略。
     """
     if name == "electricity":
         return load_electricity(segment_id=segment_id, size=size)
@@ -319,6 +420,7 @@ def load_real_world(
         variant = kwargs.pop("variant", "abrupt_balanced")
         return load_insects(
             segment_id=segment_id, size=size, variant=variant,
-            insects_aligned=insects_aligned,
+            insects_aligned=insects_aligned, aligned_v2=aligned_v2,
+            label_scheme=label_scheme,
         )
     raise ValueError(f"unknown real-world dataset {name!r}")

@@ -53,7 +53,8 @@ def parse_args():
     parser.add_argument(
         "--segment_id", type=str, default="start",
         choices=["start", "middle", "end",
-                 "early", "mid", "late_pre", "late_post"],
+                 "early", "mid", "late_pre", "late_post",
+                 "d1_14352", "d2_19500", "d3_33240", "d4_double", "d0_control"],
         help="real 数据集 segment 选择（A+: start/middle/end；B1+ aligned: early/mid/late_pre/late_post）",
     )
     parser.add_argument(
@@ -63,6 +64,17 @@ def parse_args():
     parser.add_argument(
         "--insects_aligned", action="store_true",
         help="Insects 用 4 个 drift-aligned segments（Phase 5 Stage B1+）；其他 dataset 忽略",
+    )
+    parser.add_argument(
+        "--aligned_v2", action="store_true",
+        help="Insects 用 Phase 5.5 的官方变点居中 5 段（d1_14352/d2_19500/d3_33240/"
+             "d4_double/d0_control）；与 --insects_aligned 互斥",
+    )
+    parser.add_argument(
+        "--label_scheme", type=str, default="pair_parity",
+        choices=["pair_parity", "pair_A_vs_B"],
+        help="Insects 标签方案：pair_parity（默认，6 类按奇偶折叠，保留全部行）/ "
+             "pair_A_vs_B（只留 {2,3} vs {4,5}，任务更难但丢约 1/3 行）",
     )
     parser.add_argument("--n_samples", type=int, default=5000, help="样本总数")
     parser.add_argument("--n_features", type=int, default=10, help="特征维度（rotating_boundary 建议用 2）")
@@ -102,6 +114,8 @@ def run_tabpfn_baseline(args):
         dataset = load_real_world(
             args.dataset, segment_id=args.segment_id, size=args.segment_size,
             insects_aligned=args.insects_aligned,
+            aligned_v2=args.aligned_v2,
+            label_scheme=args.label_scheme,
         )
         args.n_features = dataset.X.shape[1]
     else:

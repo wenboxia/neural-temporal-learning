@@ -37,13 +37,44 @@ DATASETS = ["regime_switching", "rotating_boundary", "combined_drift"]
 REAL_DATASETS = ["electricity", "insects"]
 SEGMENTS = ["start", "middle", "end"]
 SEGMENTS_ALIGNED = ["early", "mid", "late_pre", "late_post"]
+# Phase 5.5：官方变点居中的 5 段（d0_control 无漂移，用于测误报率）
+SEGMENTS_ALIGNED_V2 = ["d1_14352", "d2_19500", "d3_33240", "d4_double", "d0_control"]
 CONFIGS = ["phase1", "phase2", "phase3", "phase4a"]
+
+def _script_accepts(script: str, flag: str) -> bool:
+    """底层脚本是否声明了该 flag（直接扫源码里的字面量）。
+
+    没有这道过滤，--extra_args 里的 --detector_impl 会被原样塞给 run_baselines.py，
+    整批 phase1 run 会以 argparse error 全部失败。
+    """
+    try:
+        src = (ROOT / script).read_text()
+    except OSError:
+        return False
+    return f'"{flag}"' in src or f"'{flag}'" in src
+
+
+def _filter_extra_args(script: str, extra: "list[str] | None") -> list[str]:
+    """丢掉目标脚本不认识的 flag 及其值，返回它认识的那部分。"""
+    if not extra:
+        return []
+    out, keep = [], False
+    for tok in extra:
+        if tok.startswith("--"):
+            keep = _script_accepts(script, tok)
+            if keep:
+                out.append(tok)
+        elif keep:
+            out.append(tok)
+    return out
+
 
 # 各 (config, dataset) 的 base 命令（不含 --seed / --out_tag / segment）
 def build_base_cmd(
     config: str, dataset: str, dataset_source: str = "synthetic",
     segment_id: str = "start", segment_size: int = 5000,
-    insects_aligned: bool = False,
+    insects_aligned: bool = False, aligned_v2: bool = False,
+    label_scheme: str = "pair_parity", variant_tag: str = "",
 ) -> list[str]:
     """返回该 (config, dataset) 的命令模板，调用方再加 --seed / --out_tag / 真实数据 flags。"""
     if config == "phase1":
@@ -67,8 +98,13 @@ def build_base_cmd(
             "--segment_id", segment_id,
             "--segment_size", str(segment_size),
         ]
-        if insects_aligned and dataset == "insects":
-            cmd += ["--insects_aligned"]
+        if dataset == "insects":
+            if insects_aligned:
+                cmd += ["--insects_aligned"]
+            if aligned_v2:
+                cmd += ["--aligned_v2"]
+            if label_scheme != "pair_parity":
+                cmd += ["--label_scheme", label_scheme]
     else:
         if dataset == "rotating_boundary":
             if config != "phase1":
@@ -87,36 +123,52 @@ def build_base_cmd(
 def out_tag(
     config: str, dataset: str, seed: int,
     dataset_source: str = "synthetic", segment_id: str = "start",
+    variant_tag: str = "",
 ) -> str:
+    """variant_tag 把 label_scheme / detector / action 等变体写进文件名。
+
+    ⚠️ 没有它，skip-existing 会把不同变体当成同一个 run 直接跳过
+    （例如 fr=0.67 的 run 因为 fr=0 的 npz 已存在而被静默跳过）。
+    """
+    vt = f"_{variant_tag}" if variant_tag else ""
     if dataset_source == "real":
         # Phase 5: real data tag 含 segment_id；aligned 段名 (early/mid/late_pre/late_post)
         # 与 A+ 段名 (start/middle/end) 不冲突，无需额外标记
-        return f"multiseed_{config}_real_{dataset}_{segment_id}_seed{seed}"
+        return f"multiseed_{config}_real_{dataset}{vt}_{segment_id}_seed{seed}"
     # 合成 phase4a 第五轮 (Day 2 fit05random)：indicator + fit=0.5 + random init
-    if config == "phase4a":
+    if config == "phase4a" and not variant_tag:
         return f"multiseed_phase4a_fit05random_{dataset}_seed{seed}"
-    return f"multiseed_{config}_{dataset}_seed{seed}"
+    return f"multiseed_{config}{vt}_{dataset}_seed{seed}"
 
 
 def npz_path(
     config: str, dataset: str, seed: int,
     dataset_source: str = "synthetic", segment_id: str = "start",
+    variant_tag: str = "",
 ) -> Path:
-    return RESULTS_DIR / f"{out_tag(config, dataset, seed, dataset_source, segment_id)}.npz"
+    return RESULTS_DIR / (
+        out_tag(config, dataset, seed, dataset_source, segment_id, variant_tag) + ".npz"
+    )
 
 
 def build_full_cmd(
     config: str, dataset: str, seed: int,
     dataset_source: str = "synthetic", segment_id: str = "start",
     segment_size: int = 5000, insects_aligned: bool = False,
+    aligned_v2: bool = False, label_scheme: str = "pair_parity",
+    variant_tag: str = "", extra_args: "list[str] | None" = None,
 ) -> list[str]:
     cmd = build_base_cmd(
         config, dataset, dataset_source, segment_id, segment_size, insects_aligned,
+        aligned_v2, label_scheme, variant_tag,
     )
     cmd += [
         "--seed", str(seed),
-        "--out_tag", out_tag(config, dataset, seed, dataset_source, segment_id),
+        "--out_tag", out_tag(config, dataset, seed, dataset_source, segment_id, variant_tag),
     ]
+    # extra_args 只透传给认识它的脚本（phase1 = run_baselines.py 没有 detector/action 相关 flag）
+    script = cmd[1]
+    cmd += _filter_extra_args(script, extra_args)
     # phase4a：合成 Day 2 / 真实 Phase 5 都用 indicator + random init（Phase 4 final）
     if config == "phase4a":
         cmd += ["--library_init_strategy", "random"]
@@ -126,9 +178,10 @@ def build_full_cmd(
 def read_overall_acc(
     config: str, dataset: str, seed: int,
     dataset_source: str = "synthetic", segment_id: str = "start",
+    variant_tag: str = "",
 ) -> float | None:
     """从 npz 中读取 overall_acc。Phase 2 取 KNN 列。"""
-    path = npz_path(config, dataset, seed, dataset_source, segment_id)
+    path = npz_path(config, dataset, seed, dataset_source, segment_id, variant_tag)
     if not path.exists():
         return None
     data = np.load(path, allow_pickle=False)
@@ -187,7 +240,9 @@ def append_phase4a_partial_row(rec: dict) -> None:
         )
 
 
-def run_one(task: tuple, log_dir: Path, insects_aligned: bool = False) -> dict:
+def run_one(task: tuple, log_dir: Path, insects_aligned: bool = False,
+            aligned_v2: bool = False, label_scheme: str = "pair_parity",
+            variant_tag: str = "", extra_args: "list[str] | None" = None) -> dict:
     """跑一个 task；synthetic = (config, dataset, seed)，real = (config, dataset, seed, segment_id)。"""
     if len(task) == 4:
         config, dataset, seed, segment_id = task
@@ -196,12 +251,15 @@ def run_one(task: tuple, log_dir: Path, insects_aligned: bool = False) -> dict:
         config, dataset, seed = task
         dataset_source = "synthetic"
         segment_id = "start"
-    log_path = log_dir / f"{out_tag(config, dataset, seed, dataset_source, segment_id)}.log"
+    log_path = log_dir / (
+        out_tag(config, dataset, seed, dataset_source, segment_id, variant_tag) + ".log"
+    )
     log_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = build_full_cmd(
         config, dataset, seed, dataset_source, segment_id,
-        insects_aligned=insects_aligned,
+        insects_aligned=insects_aligned, aligned_v2=aligned_v2,
+        label_scheme=label_scheme, variant_tag=variant_tag, extra_args=extra_args,
     )
     t0 = time.time()
     try:
@@ -213,23 +271,27 @@ def run_one(task: tuple, log_dir: Path, insects_aligned: bool = False) -> dict:
         elapsed = time.time() - t0
         status = f"exc:{type(e).__name__}"
 
-    acc = read_overall_acc(config, dataset, seed, dataset_source, segment_id)
+    acc = read_overall_acc(config, dataset, seed, dataset_source, segment_id, variant_tag)
     return {
         "config": config, "dataset": dataset, "seed": seed,
         "dataset_source": dataset_source, "segment_id": segment_id,
+        "variant_tag": variant_tag, "label_scheme": label_scheme,
         "status": status, "elapsed_sec": elapsed, "overall_acc": acc,
+        "cmd": " ".join(cmd),
         "log": str(log_path.relative_to(ROOT)),
     }
 
 
-def write_partial_summary(dataset_source: str = "synthetic", partial_tag: str = ""):
+def write_partial_summary(dataset_source: str = "synthetic", partial_tag: str = "",
+                          variant_tag: str = "", seg_pool_override: "list[str] | None" = None):
     """根据 results/ 下现存 multiseed_*.npz 写 partial summary 表格。
 
     partial_tag: 文件名后缀（例如 "_electricity"），便于 Stage A/B 分开追踪。
     """
     rows = []
     if dataset_source == "real":
-        ds_pool, seg_pool = REAL_DATASETS, SEGMENTS
+        ds_pool = REAL_DATASETS
+        seg_pool = seg_pool_override or SEGMENTS
         out_name = f"multiseed_phase5{partial_tag}.partial.md"
     else:
         ds_pool, seg_pool = DATASETS, ["start"]  # synthetic 占位
@@ -240,7 +302,7 @@ def write_partial_summary(dataset_source: str = "synthetic", partial_tag: str = 
             for seg in seg_pool:
                 accs = []
                 for s in SEEDS:
-                    a = read_overall_acc(config, dataset, s, dataset_source, seg)
+                    a = read_overall_acc(config, dataset, s, dataset_source, seg, variant_tag)
                     if a is not None:
                         accs.append(a)
                 if accs:
@@ -290,6 +352,17 @@ def parse_args():
                    help="real 时 segment 大小（A+ 协议默认 5000）")
     p.add_argument("--partial_tag", type=str, default="",
                    help="partial.md 文件名后缀，例如 '_electricity'（Stage A/B 分开追踪）")
+    p.add_argument("--aligned_v2", action="store_true",
+                   help="Insects 用 Phase 5.5 官方变点居中的 5 段；"
+                        f"会把 --segments 默认改为 {SEGMENTS_ALIGNED_V2}")
+    p.add_argument("--label_scheme", type=str, default="pair_parity",
+                   choices=["pair_parity", "pair_A_vs_B"],
+                   help="Insects 标签方案（非默认值会自动进 variant_tag，避免 skip-existing 误跳）")
+    p.add_argument("--variant_tag", type=str, default="",
+                   help="变体标签，写进 out_tag/npz/log 文件名。留空时按 label_scheme 等自动推断")
+    p.add_argument("--extra_args", type=str, default="",
+                   help="透传给底层脚本的额外参数，空格分隔，"
+                        "例如 '--detector_impl river --action_on_alarm context_reset'")
     p.add_argument("--insects_aligned", action="store_true",
                    help="Insects 用 4 个 drift-aligned segments (Phase 5 B1+)；"
                         "会自动把 --segments 默认改为 early,mid,late_pre,late_post")
@@ -302,10 +375,41 @@ def main():
     configs = [c.strip() for c in args.configs.split(",") if c.strip()]
     datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
+
+    if args.insects_aligned and args.aligned_v2:
+        raise SystemExit("[error] --insects_aligned 与 --aligned_v2 互斥")
+
+    # --aligned_v2 时若用户没显式给 --segments，就用 v2 的 5 段
+    default_segments = ",".join(SEGMENTS)
+    if args.aligned_v2 and args.segments == default_segments:
+        args.segments = ",".join(SEGMENTS_ALIGNED_V2)
+    elif args.insects_aligned and args.segments == default_segments:
+        args.segments = ",".join(SEGMENTS_ALIGNED)
     segments = (
         [s.strip() for s in args.segments.split(",") if s.strip()]
         if args.dataset_source == "real" else ["start"]  # synthetic 占位
     )
+
+    # variant_tag：没显式给就从会改变结果的开关里推断。
+    # 没有它，skip-existing 会把不同变体当成已跑过的同一个 run 直接跳过。
+    variant_tag = args.variant_tag
+    if not variant_tag:
+        if args.extra_args:
+            raise SystemExit(
+                "[error] 用了 --extra_args 就必须显式给 --variant_tag。\n"
+                "  extra_args 会改变结果，而 out_tag 不含它 → skip-existing 会把这批 run\n"
+                "  当成已跑过的旧变体直接跳过，或反过来覆盖旧结果。\n"
+                f"  例如：--variant_tag v2AvsB_river_ctxreset"
+            )
+        parts = []
+        if args.aligned_v2:
+            parts.append("v2")
+        if args.label_scheme != "pair_parity":
+            parts.append(args.label_scheme)
+        variant_tag = "_".join(parts)
+    extra_args = args.extra_args.split() if args.extra_args else None
+    if variant_tag:
+        print(f"variant_tag: {variant_tag}")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     log_dir = LOGS_DIR / "multiseed"
@@ -326,13 +430,13 @@ def main():
             for seed in seeds:
                 if args.dataset_source == "real":
                     for seg in segments:
-                        if npz_path(config, dataset, seed, "real", seg).exists():
-                            print(f"  [skip] {npz_path(config, dataset, seed, 'real', seg).name}")
+                        if npz_path(config, dataset, seed, "real", seg, variant_tag).exists():
+                            print(f"  [skip] {npz_path(config, dataset, seed, 'real', seg, variant_tag).name}")
                             continue
                         tasks.append((config, dataset, seed, seg))
                 else:
-                    if npz_path(config, dataset, seed).exists():
-                        print(f"  [skip] {npz_path(config, dataset, seed).name}")
+                    if npz_path(config, dataset, seed, variant_tag=variant_tag).exists():
+                        print(f"  [skip] {npz_path(config, dataset, seed, variant_tag=variant_tag).name}")
                         continue
                     tasks.append((config, dataset, seed))
         return tasks
@@ -348,10 +452,15 @@ def main():
                 if args.dataset_source == "real":
                     cmd = build_full_cmd(
                         task[0], task[1], task[2], "real", task[3], args.segment_size,
-                        insects_aligned=args.insects_aligned,
+                        insects_aligned=args.insects_aligned, aligned_v2=args.aligned_v2,
+                        label_scheme=args.label_scheme, variant_tag=variant_tag,
+                        extra_args=extra_args,
                     )
                 else:
-                    cmd = build_full_cmd(task[0], task[1], task[2])
+                    cmd = build_full_cmd(
+                        task[0], task[1], task[2], variant_tag=variant_tag,
+                        extra_args=extra_args,
+                    )
                 print("  " + " ".join(cmd))
                 n_plan += 1
         print(f"\n--- summary: {n_plan} runs to execute ---")
@@ -371,27 +480,35 @@ def main():
         if n_par == 1:
             # 串行
             for task in tasks:
-                rec = run_one(task, log_dir, insects_aligned=args.insects_aligned)
+                rec = run_one(task, log_dir, insects_aligned=args.insects_aligned,
+                              aligned_v2=args.aligned_v2, label_scheme=args.label_scheme,
+                              variant_tag=variant_tag, extra_args=extra_args)
                 all_records.append(rec)
                 print(f"  [{rec['status']}] {rec['config']} / {rec['dataset']} / seed{rec['seed']} "
                       f"acc={rec['overall_acc']} elapsed={rec['elapsed_sec']:.0f}s log={rec['log']}")
-                write_partial_summary(args.dataset_source, args.partial_tag)
+                write_partial_summary(args.dataset_source, args.partial_tag,
+                                      variant_tag, segments)
         else:
             # 同 dataset 内并行
             with ProcessPoolExecutor(max_workers=n_par) as ex:
-                futs = {ex.submit(run_one, t, log_dir, args.insects_aligned): t for t in tasks}
+                futs = {
+                    ex.submit(run_one, t, log_dir, args.insects_aligned, args.aligned_v2,
+                              args.label_scheme, variant_tag, extra_args): t
+                    for t in tasks
+                }
                 for fut in as_completed(futs):
                     rec = fut.result()
                     all_records.append(rec)
                     print(f"  [{rec['status']}] {rec['config']} / {rec['dataset']} / seed{rec['seed']} "
                           f"acc={rec['overall_acc']} elapsed={rec['elapsed_sec']:.0f}s log={rec['log']}")
-                    write_partial_summary(args.dataset_source, args.partial_tag)
+                    write_partial_summary(args.dataset_source, args.partial_tag,
+                                          variant_tag, segments)
                     if rec["config"] == "phase4a" and rec.get("dataset_source", "synthetic") == "synthetic":
                         append_phase4a_partial_row(rec)
 
     total_elapsed = time.time() - overall_t0
     print(f"\n=== ALL DONE in {total_elapsed/60:.1f} min ===")
-    write_partial_summary()
+    write_partial_summary(args.dataset_source, args.partial_tag, variant_tag, segments)
 
     # 落盘运行记录
     rec_path = RESULTS_DIR / "multiseed_runlog.json"
