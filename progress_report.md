@@ -80,9 +80,9 @@ TabPFN 在稳定体制下准确率高达 87%，但每次漂移点后准确率骤
 
 ---
 
-## Phase 2.5：导师反馈补强
+## Phase 2.5：方法学补强
 
-基于导师 3 月 11 日反馈的 4 项改进建议，在推进 Phase 3 之前将 Phase 1 & 2 的实验做扎实。
+基于 4 项方法学改进建议，在推进 Phase 3 之前将 Phase 1 & 2 的实验做扎实。
 
 ### 步骤 A：类别平衡修复 ✅
 
@@ -165,7 +165,7 @@ FastCorrector（Level 3 only）在三种漂移类型上均未显著超越 baseli
 
 **关键发现**：
 
-1. **适应速度确实提升**：fixed_ratio 越高，漂移后恢复越快（126→62→53 步），验证了导师"固定代表集 + 滑动窗"的思路
+1. **适应速度确实提升**：fixed_ratio 越高，漂移后恢复越快（126→62→53 步），验证了"固定代表集 + 滑动窗"的思路
 2. **但总体准确率下降明显**：固定池来自最早体制（Regime 0），在后续体制中成为噪声，干扰 TabPFN in-context learning
 3. **200+100 是较好的折中**：适应速度减半（126→62），总体准确率只降 2.5pp；280+20 适应最快但准确率降 11pp，代价过大
 4. **结论**：纯 context 组合无法同时兼顾稳态性能和适应速度，需要 Phase 3 的多时间尺度架构（软门控融合）来自动平衡
@@ -178,9 +178,9 @@ FastCorrector（Level 3 only）在三种漂移类型上均未显著超越 baseli
 
 ```
 slow_prior(X_ctx, y_ctx, x_t) → y_slow
-fast_corrector.correct(x_t)  → y_fast = clip(y_slow + correction, 0, 1)
+fast_corrector.correct(x_t) → y_fast = clip(y_slow + correction, 0, 1)
 gated_ensemble(x_t, y_slow, y_fast) → (y_final, weights=[α, β, γ])
-loss = MSE(y_final, y_t); optimizer.step()         # 在线训练 gate + adapter
+loss = MSE(y_final, y_t); optimizer.step() # 在线训练 gate + adapter
 fast_corrector.update(x_t, error)
 if fast_corrector.should_consolidate(): consolidator.consolidate(...)
 ```
@@ -339,13 +339,13 @@ post-drift 反而下降是因为：之前 β≈0 时 adapter 不工作但也不�
 
 4. **设计 C（残差链无 gate）一致否决**（4/4）：β=0 已证明 adapter 输出有害，钉死 β=γ=1 是已证伪路径的延续。
 
-完整 4 模型回答见对话存档；整合后的 Phase 4 plan 见 [phase4_plan.md](phase4_plan.md)。
+完整 4 模型回答见对话存档；整合后的 Phase 4 plan 见 phase4_plan.md（本地文档，未随仓库发布）。
 
 ---
 
 ## Phase 4 Day 0.5 — Cheap Diagnostic 完成（2026-04-27）
 
-按 [phase4_plan.md](phase4_plan.md) 的 Day 0.5 spec 完成两个并行实验。
+按 phase4_plan.md（本地文档，未随仓库发布） 的 Day 0.5 spec 完成两个并行实验。
 
 ### 实验 0a：Oracle Context-Reset on regime_switching
 
@@ -426,17 +426,17 @@ LLM cross-review 的**最高价值产出**：multi-seed 这个方法学要求。
 
 ### 实施内容
 
-按 [phase4_plan.md](phase4_plan.md) "Design A" 段落，完成以下交付（commit 历史中可追溯）：
+按 phase4_plan.md（本地文档，未随仓库发布） "Design A" 段落，完成以下交付（commit 历史中可追溯）：
 
 - **新文件**：
-  - `src/drift/error_detector.py`：自包含 ADWIN 实现（不依赖 river），Hoeffding 切点扫描 + cooldown 抑制重复触发；6 条单测全过
-  - `src/regime/adapter_library.py`：`AdapterLibrary(nn.Module)` 类，`nn.ModuleDict[str(int), MLP]` + 硬路由 + 每 adapter 独立 Adam optimizer；8 条单测全过（含 isolation：非 active adapter 0 grad 验证）
-  - `scripts/run_phase4_a.py`：入口脚本，绘图含 active adapter id 轨迹 subplot
+ - `src/drift/error_detector.py`：自包含 ADWIN 实现（不依赖 river），Hoeffding 切点扫描 + cooldown 抑制重复触发；6 条单测全过
+ - `src/regime/adapter_library.py`：`AdapterLibrary(nn.Module)` 类，`nn.ModuleDict[str(int), MLP]` + 硬路由 + 每 adapter 独立 Adam optimizer；8 条单测全过（含 isolation：非 active adapter 0 grad 验证）
+ - `scripts/run_phase4_a.py`：入口脚本，绘图含 active adapter id 轨迹 subplot
 - **修改** `src/models/multi_timescale.py`：加 `use_adapter_library` flag（默认 False = Phase 3 v2+B+F 行为不变，Phase 5 引用代码完整性保留）；True 时 drop-in 替换 `gated_ensemble.adapter` 为 AdapterLibrary，detector 在每步 raw error 上 update，触发逻辑改为纯 detector 驱动（routing → consolidate active）
 - **集成单测** `tests/test_multi_timescale_phase4a.py`：用 mock SlowPrior 注入受控 mean-shift，验证 detector + route + consolidate 全链路触发；3 条全过
 - **实验**：3 数据集 × 5 seeds × Phase 4 A = 15 runs，driver 总耗时 5.5 h，全部 status=ok
 
-详见 [results/phase4_a_summary.md](results/phase4_a_summary.md)。
+详见 results/phase4_a_summary.md（该中间总结未保留）。
 
 ### 数值结果
 
@@ -444,17 +444,17 @@ n=5, mean ± std (ddof=1)：
 
 | 数据集 | Phase 1 | Phase 3 v2+B+F | **Phase 4 A** |
 |---|---|---|---|
-| `regime_switching`  | 79.89 ± 0.99 % | 79.71 ± 0.72 % | 79.46 ± 1.01 % |
+| `regime_switching` | 79.89 ± 0.99 % | 79.71 ± 0.72 % | 79.46 ± 1.01 % |
 | `rotating_boundary` | 82.07 ± 0.56 % | 83.06 ± 0.76 % | **83.42 ± 0.77 %** |
-| `combined_drift`    | 82.24 ± 0.40 % | 81.77 ± 0.56 % | 81.90 ± 0.47 % |
+| `combined_drift` | 82.24 ± 0.40 % | 81.77 ± 0.56 % | 81.90 ± 0.47 % |
 
 Paired t-test，Phase 4 A vs Phase 1（n=5, df=4, |t|≥2.78 sig at α=0.05）：
 
 | 数据集 | Δ (pp) | t | sig? | 验收线 | 验收 |
 |---|---|---|---|---|---|
-| `regime_switching`  | −0.43 | −6.82 | ✓ sig 负向 | ≥ −1pp（不打破 NS） | △ 在 −1pp 内但从 NS 变 sig 负向 |
+| `regime_switching` | −0.43 | −6.82 | ✓ sig 负向 | ≥ −1pp（不打破 NS） | △ 在 −1pp 内但从 NS 变 sig 负向 |
 | `rotating_boundary` | **+1.35** | +7.76 | ✓ **sig 正向** | ≥ +0.5pp | ✓ **超额完成** |
-| `combined_drift`    | −0.34 | −4.85 | ✓ sig 负向 | ≥ −0.1pp（理想 ≥ +0.5pp）| ✗ **未达**（仍 sig 负向）|
+| `combined_drift` | −0.34 | −4.85 | ✓ sig 负向 | ≥ −0.1pp（理想 ≥ +0.5pp）| ✗ **未达**（仍 sig 负向）|
 
 Paired t-test，Phase 4 A vs Phase 3：三数据集**全部 NS**（Δ ∈ {−0.25, +0.36, +0.13}, |t| ∈ {1.59, 2.09, 1.10}）→ Phase 4 A 与 Phase 3 在统计上等价。
 
@@ -517,7 +517,7 @@ phase4_plan 失败条件 = "rotating 失去 +1pp 赢点" → **未触发**（rot
 | 真实漂移点 | t=500 | t=1000 | t=1500 | t=2000 | t=2500 |
 |---|---|---|---|---|---|
 | segment |error| mean | 0.30 | 0.32 | 0.30 | 0.33 | 0.32 |
-| Δmean   | +0.018 | −0.017 | +0.026 | −0.005 | −0.035 |
+| Δmean | +0.018 | −0.017 | +0.026 | −0.005 | −0.035 |
 
 |error| 在 regime 间 mean shift 仅 ±0.005 ~ ±0.035，但 |error| 流自身 std = 0.24 → **信号弱 7~50 倍于噪声**。TabPFN 的 sliding-context in-context learning 在 regime 切换后快速调整 y_slow 使 |y_t − y_slow| 平均水平回归 ≈ 0.30，所以 |error| mean 跨 regime 几乎不变。**Option C（调 detector_delta）救不了** —— 信号本身没 mean shift。
 
@@ -541,9 +541,9 @@ phase4_plan 失败条件 = "rotating 失去 +1pp 赢点" → **未触发**（rot
 
 | 数据集 | 真实漂移点 | sum routes / 15 | avg routes / seed | recall |
 |---|---|---|---|---|
-| `regime_switching`  | 5 (循环)         | 7  | 1.4 | 28% |
-| `rotating_boundary` | 4 (渐进)         | 0  | 0.0 | 0%（设计精神，详下）|
-| `combined_drift`    | 1 (t=3000)       | 5  | 1.0 | 80% |
+| `regime_switching` | 5 (循环) | 7 | 1.4 | 28% |
+| `rotating_boundary` | 4 (渐进) | 0 | 0.0 | 0%（设计精神，详下）|
+| `combined_drift` | 1 (t=3000) | 5 | 1.0 | 80% |
 
 **rotating_boundary 0 触发是设计精神而非 bug**：渐进漂移下错误率随时间缓慢上升，indicator 流没有阶跃式 mean shift，ADWIN 切点看不到清晰边界。这与 Design A 设计思想吻合 —— 渐进漂移上 routing 退化为"single adapter + per-step gate 训练"，与 Phase 3 渐进漂移上的赢点机制等价。
 
@@ -553,17 +553,17 @@ vs Phase 1 baseline：
 
 | 数据集 | Δ (pp) | t | p | sig? | 验收线 | 验收 |
 |---|---|---|---|---|---|---|
-| `regime_switching`  | −0.66 | −2.17 | 0.0954 | NS | ≥ −1pp | ✓ 通过 |
+| `regime_switching` | −0.66 | −2.17 | 0.0954 | NS | ≥ −1pp | ✓ 通过 |
 | `rotating_boundary` | **+1.51** | **+6.38** | **0.0031** | ✓ sig 正 | ≥ +0.5pp | ✓ **超额** |
-| `combined_drift`    | −0.28 | −4.12 | 0.0146 | ✓ sig 负 | ≥ −0.1pp | ✗ **未达** |
+| `combined_drift` | −0.28 | −4.12 | 0.0146 | ✓ sig 负 | ≥ −0.1pp | ✗ **未达** |
 
 vs Phase 3 v2+B+F：
 
 | 数据集 | Δ (pp) | t | p | sig? |
 |---|---|---|---|---|
-| `regime_switching`  | **−0.48** | −2.91 | 0.044 | ✓ sig 负 |
+| `regime_switching` | **−0.48** | −2.91 | 0.044 | ✓ sig 负 |
 | `rotating_boundary` | **+0.51** | +2.96 | 0.041 | ✓ sig 正 |
-| `combined_drift`    | **+0.20** | +3.46 | 0.026 | ✓ sig 正 |
+| `combined_drift` | **+0.20** | +3.46 | 0.026 | ✓ sig 正 |
 
 **Indicator run 代表图**（seed 42, 两个数据集对比）：
 
@@ -627,9 +627,9 @@ vs Phase 1 baseline：
 
 | 数据集 | Δ (pp) | t | sig? | 验收 |
 |---|---|---|---|---|
-| `regime_switching`  | −0.29 | −1.49 | NS | ✓ |
+| `regime_switching` | −0.29 | −1.49 | NS | ✓ |
 | `rotating_boundary` | **+1.32** | **+8.80** | ✓ sig | ✓ **超额** |
-| `combined_drift`    | **−0.55** | −6.37 | ✓ sig 负 | ✗ **未达**（最差）|
+| `combined_drift` | **−0.55** | −6.37 | ✓ sig 负 | ✗ **未达**（最差）|
 
 vs Phase 3 三数据集**全 NS**（warm-start + threshold 抹平了 indicator vs P3 的三个 sig 差异，包括 combined +0.20pp 翻正）。
 
@@ -708,7 +708,7 @@ Day 1.5 四轮 ablation 结果证实 Design A 在合成数据上 mixed bag（rot
 
 Day 1.5 warmstart 实验同时改了两个变量（`fit_threshold` 0.05→0.5 + init random→warm），2×2 析因网格缺一格 (fit_threshold=0.5, random init)。Day 2 补这格 = 5.5h × 1 round。完成后 Ch7 重写为干净的 2×2 析因。
 
-详见 [phase5_plan.md](phase5_plan.md) §0。
+详见 phase5_plan.md（本地文档，未随仓库发布） §0。
 
 ### 实施结果
 
@@ -722,9 +722,9 @@ vs Phase 1 baseline：
 
 | 数据集 | Δ (pp) | t | sig? | 验收 |
 |---|---|---|---|---|
-| `regime_switching`  | −0.29 | −1.58 | NS | ✓ |
+| `regime_switching` | −0.29 | −1.58 | NS | ✓ |
 | `rotating_boundary` | **+1.52** | **+8.67** | ✓ sig | ✓ **超额（5 轮中最佳）**|
-| `combined_drift`    | −0.47 | −1.96 | NS（边缘）| ✗（仍未达，但 warmstart sig 负 → fit05random NS）|
+| `combined_drift` | −0.47 | −1.96 | NS（边缘）| ✗（仍未达，但 warmstart sig 负 → fit05random NS）|
 
 vs warmstart（控制变量：random vs warm，fit=0.5 不变）：三数据集**全 NS**（Δ ∈ {0.00, +0.20, +0.08}），random 一致**不差于** warm-start。
 
@@ -742,14 +742,14 @@ vs indicator（控制变量：fit_threshold 0.05→0.5，init=random 不变）�
 
 ```
 Δ vs Phase 1 baseline (combined_drift):
-  indicator    (fit=0.05, random):  -0.275 pp
-  fit05random  (fit=0.5,  random):  -0.467 pp     [Day 2 新填的 cell]
-  warmstart    (fit=0.5,  warm):    -0.550 pp
+ indicator (fit=0.05, random): -0.275 pp
+ fit05random (fit=0.5, random): -0.467 pp [Day 2 新填的 cell]
+ warmstart (fit=0.5, warm): -0.550 pp
 
-  fit_threshold effect (init=random fixed): -0.192 pp  (70% 贡献)
-  init_strategy effect (fit=0.5    fixed):  -0.083 pp  (30% 贡献)
-  Sum                                       = -0.275 pp
-  Actual indicator → warmstart              = -0.275 pp     ⟹ 加性，无交互
+ fit_threshold effect (init=random fixed): -0.192 pp (70% 贡献)
+ init_strategy effect (fit=0.5 fixed): -0.083 pp (30% 贡献)
+ Sum = -0.275 pp
+ Actual indicator → warmstart = -0.275 pp ⟹ 加性，无交互
 ```
 
 → **fit_threshold 是 combined_drift 退化主因**（70%），warm-start 是次因（30%）。两个设计变量可独立分析。
@@ -762,7 +762,7 @@ Day 1.5 warmstart 章节写"warm-start 在 abrupt boundary reversal 上是 anti-
 
 跨三种 (fit_threshold, init_strategy) 配置 **52/52 routing 全 create / 0 reuse**：
 - indicator (fit=0.05, random): 25 routes, 25 create, 0 reuse
-- warmstart (fit=0.5, warm):    13 routes, 13 create, 0 reuse
+- warmstart (fit=0.5, warm): 13 routes, 13 create, 0 reuse
 - fit05random (fit=0.5, random): 14 routes, 14 create, 0 reuse
 
 **fit_threshold 调宽 10× + init_strategy 切换都未触发 reuse 一次**。这强化论文 Ch8 lesson 2：reuse 判定函数（MSE on raw error 残差）的设计与 raw error 自身 std 量级冲突，**不是参数调节问题**。
@@ -790,10 +790,10 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 
 ## Phase 5 — Real-World Validation
 
-> ⚠️ **framing 说明（2026-06-01 导师汇报后追加）**
+> ⚠️ **framing 说明（2026-06-01 方向调整后追加）**
 > 本节的**实验数据、统计结论、γ 诊断的事实内容全部有效**。
 > 被取代的只是把这些负面结果定位为"论文核心 contribution / mechanistic discovery"这一点 ——
-> 该定位已被导师否定，详见 本文件 §「2026-06-01 导师汇报反馈」。
+> 该定位已被放弃，详见本文件 §「2026-06-01 — 方向调整」。
 > 关键推论：detector 从未触发 ⇒ 三层结构未被激活 ⇒ **"方法无效"这个结论其实从未被真正验证过**。
 > 当前主线是 Phase 5.5（重设计 detector 信号），见 [todo.md](todo.md) P1。
 
@@ -815,7 +815,7 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 
 | Comparison (n=15 paired) | Δ (pp) | t | p | sig? |
 |---|---|---|---|---|
-| phase3 vs phase1  | −0.124 | −2.51 | 0.0247 | **sig 负** |
+| phase3 vs phase1 | −0.124 | −2.51 | 0.0247 | **sig 负** |
 | phase4a vs phase1 | −0.064 | −1.49 | 0.1574 | NS |
 | phase4a vs phase3 | +0.060 | +1.03 | 0.3221 | NS |
 
@@ -836,7 +836,7 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 
 **Stage A Electricity 三段 phase4a 代表图**（seed 42）：
 
-| start [0, 5000)  | middle [中段] | end [40k-45k] |
+| start [0, 5000) | middle [中段] | end [40k-45k] |
 |---|---|---|
 | ![Stage A start](results/multiseed_phase4a_real_electricity_start_seed42.png) | ![Stage A middle](results/multiseed_phase4a_real_electricity_middle_seed42.png) | ![Stage A end](results/multiseed_phase4a_real_electricity_end_seed42.png) |
 
@@ -850,13 +850,13 @@ phase4_plan 核心成功条件（combined 翻 non-negative vs P1）= **五轮全
 - middle [23924, 28924) — 0 drifts (5 个 drifts 全 < 23924 或 > 46508)
 - end [47848, 52848) — 1 drift @ local 3945 (= absolute 51800)
 
-A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `results/archive_misaligned_stage_b/`，保留 methodology narrative arc（"protocol identification through post-hoc empirical analysis"）。
+A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `results/archive/misaligned_stage_b/`，保留 methodology narrative arc（"protocol identification through post-hoc empirical analysis"）。
 
 **Archived 失败案例代表图**（end segment phase4a，唯一含 1 drift 的段）：
 
-![Archived Stage B end](results/archive_misaligned_stage_b/multiseed_phase4a_real_insects_end_seed42.png)
+![Archived Stage B end](results/archive/misaligned_stage_b/multiseed_phase4a_real_insects_end_seed42.png)
 
-> end segment 是 A+ 协议中唯一含 drift 的段（local t=3945），但 detector 仍未触发 —— 这成为后续 γ 诊断的入口：即便 segment 真有 drift，detector 在 TabPFN-class 系统上仍沉默。完整 archived 数据集（45 npz + 45 png + partial md）在 `results/archive_misaligned_stage_b/`。
+> end segment 是 A+ 协议中唯一含 drift 的段（local t=3945），但 detector 仍未触发 —— 这成为后续 γ 诊断的入口：即便 segment 真有 drift，detector 在 TabPFN-class 系统上仍沉默。完整 archived 数据集（45 npz + 45 png + partial md）在 `results/archive/misaligned_stage_b/`。
 
 ### Phase 5 Stage B B1+ (re-aligned) — 完成（2026-05-29）
 
@@ -864,10 +864,10 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 
 | segment | 范围 | 覆盖 drift @ local | drift 距边界 |
 |---|---|---|---|
-| early     | [10000, 15000) | 2,672 + 4,256   | ≥ 744 ✓ |
-| mid       | [16000, 21000) | 1,952           | ≥ 1,952 ✓ |
-| late_pre  | [42500, 47500) | 4,228           | ≥ 772 ✓ |
-| late_post | [47848, 52848) | 4,160           | ≥ 840 ✓ |
+| early | [10000, 15000) | 2,672 + 4,256 | ≥ 744 ✓ |
+| mid | [16000, 21000) | 1,952 | ≥ 1,952 ✓ |
+| late_pre | [42500, 47500) | 4,228 | ≥ 772 ✓ |
+| late_post | [47848, 52848) | 4,160 | ≥ 840 ✓ |
 
 60 runs（3 phases × 4 segments × 5 seeds），3606 min ≈ 60.1h wall (n_parallel=2)，全部 `[ok]`。
 
@@ -875,9 +875,9 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 
 | Comparison | Δ (pp) | t | p | sig? |
 |---|---|---|---|---|
-| phase3 vs phase1     | −0.101 | −3.48 | 0.0025 | sig 负 |
-| **phase4a vs phase1**    | **−0.172** | **−5.42** | **<0.0001** | **sig 负** |
-| phase4a vs phase3    | −0.071 | −1.98 | 0.0626 | NS 边缘 |
+| phase3 vs phase1 | −0.101 | −3.48 | 0.0025 | sig 负 |
+| **phase4a vs phase1** | **−0.172** | **−5.42** | **<0.0001** | **sig 负** |
+| phase4a vs phase3 | −0.071 | −1.98 | 0.0626 | NS 边缘 |
 
 **Per-segment phase4a vs phase1**：3/4 sig 负（early −0.217 / mid −0.179 / late_post −0.183，late_pre −0.108 NS）。
 
@@ -907,8 +907,8 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 
 | Drift @ segment | indicator pre | indicator post | \|Δ\| |
 |---|---|---|---|
-| 2672 @ early    | 0.015 | 0.020 | 0.005 |
-| 1952 @ mid      | 0.015 | 0.011 | 0.004 |
+| 2672 @ early | 0.015 | 0.020 | 0.005 |
+| 1952 @ mid | 0.015 | 0.011 | 0.004 |
 | 4228 @ late_pre | 0.044 | 0.025 | 0.019 |
 | 4160 @ late_post | 0.010 | 0.000 | 0.010 |
 
@@ -963,84 +963,19 @@ A+ protocol 与 Insects 5 个 documented drift 位置不对齐。归档于 `resu
 
 **Phase 5 不要求"赢"的设计精神达成**：findings 复现（无论正反），methodology narrative 自洽，paper 起点就绪。**论文核心 contribution 升级**：从"设计 trap 系统性 mapping"扩展到"该 mapping 在真实 abrupt drift 上的 systemic failure mode 量化定位"。
 
-完整 plan 见 [phase5_plan.md](phase5_plan.md)。Phase 5 完成 → Phase 6 论文撰写就绪。
+完整 plan 见 phase5_plan.md（本地文档，未随仓库发布）。Phase 5 完成 → Phase 6 论文撰写就绪。
 
 ---
 
-## 2026-06-01 — 导师汇报反馈 ⚠️ 方向纠正
+## 2026-06-01 — 方向调整
 
-**来源**：会议录音转写 `6_1和导师汇报的录音_包含两份转写.txt`（私人文件，已 gitignore）。
-两份 AI 转写（GPT-6 Astra + 讯飞听见）在以下要点上互相印证；引文以 GPT-6 Astra 版为准，
-转写未经逐句人工听校，个别措辞可能有偏差，但要点一致。
+本阶段之后项目方向作过一次调整：先前把检测器沉默的机制定位当作论文核心卖点，
+该定位被放弃，改为重新设计检测信号、争取正面结果。**实验数据与统计结论不受影响**，
+被取代的只是结论的定位。后续工作见下方 Phase 5.5 各节。
 
-### 核心反馈 1：negative-result framing 被否定
+> 讨论纪要与原始出处属私人材料，保留在本地，未随仓库发布。
 
-Phase 5 结束后，项目文档一度把 γ 诊断的机制定位（"foundation model self-adaptation 速度
-outpaces change-point detector delay"）当作论文核心 contribution，标题候选
-*"When Foundation Models Outrun Drift Detectors"*。汇报中把这个 framing 讲给导师后：
-
-> "我觉得这个可能很容易答辩的时候就比较容易被质疑……我觉得这个不太靠谱，还是不太稳。
-> 还是得有一些正面的，我们还是按照正面来推进。"
-
-> "我们得先尽快定出来一版比较正面的结果。（这是）论文能不能立足的一个关键。
-> 如果都是负面结果的话，这个论文其实也不太好写。"
-
-**结论**：negative-result / mechanistic-discovery 不作为论文核心卖点。
-**实验数据与统计结论全部有效**，被取代的只是"这是重大发现"这个定位。
-负面结果保留为方法演进的中间步骤 / 附录（答辩需答得出"试过哪些方案"，且是工作量证明）。
-
-### 核心反馈 2：detector 不触发是设计问题，不是根本性质
-
-> "现在你之所以没有提升，只是因为你的检测器其实还没起作用……
-> 我觉得算法本身应该是可行的，只不过你的检测器把它拦截下来了。"
-
-> "如果你现在检测器都不触发的话，你的三层的结构其实就完全体现不了作用，
-> 你现在这个方法其实就无法去验证。"
-
-**关键推论**：Electricity 1/15、Insects 0/20 的触发率意味着**三层结构从未被激活**，
-因此 Phase 4/5 得出的"方法无效"结论**其实从未被真正验证过**。
-
-### 核心反馈 3：三个具体方向（导师说"平行"）
-
-**路径 A — 对比信号 detector**
-> "你可以比较它的适应前后的差距，适应前后的差距作为 detect 的信号。
-> 因为你现在如果用它适应以后的误差的话，那个信号就很弱了，所以你需要找一些强的信号。"
-> "一个是滑窗 0 就不适应，一个是滑窗 300，两种对比，那个差作为信号去作为检测器的信号……
-> 基于检测信号可以判定它 drift 的强弱，如果你的差值很大说明 drift 比较明显，很直观。"
-
-**路径 B — fixed_ratio**
-> "你固定更多，它的 error 本来就更大了……两种路径都是为了提升它的检测器的信号强度，
-> 然后去验证你的校正器。否则的话你如果信号很弱的话，校正器就验证不了。"
-
-**维度 C — 遗忘 / 适应 trade-off**（导师点名最可能出正面结果）
-> "拿之前那批数据也作为一个指标，看一下之前上面的效果，做一个适应跟遗忘之间的平衡。"
-> "遗忘程度跟你的适应能力一定是 trade-off 的关系，不可能既要都要……
-> 你的适应能力差不多的情况下，你的前面的遗忘能不能减少。
-> 如果这个是可以的话，那它也可以作为你一个正面结果的一个点。"
-
-### 核心反馈 4：实验策略与范围
-
-| 议题 | 导师意见 |
-|---|---|
-| 新实验先合成还是先真实 | **直接在真实上验证**。"合成数据有点太理想了，只适合做一些可行性分析，实际的效果还得看真实数据上" |
-| 数据集是否够 | 够。"这两个数据集应该选得还可以，一个作为渐进的漂移，一个作为突发漂移"、"这几个数据应该已经算比较干净了" → **不需要第三个数据集** |
-| B1+ drift-aligned 四段切法 | 认可。"就在 drift 的前后，其实主要就是验证 drift"。后续若效果可以再拉大数据量（"保证大概几万个点"） |
-| fit_threshold / init_strategy 类细粒度 ablation | 降级。"治根不治本……这些调整我觉得应该是最后补充的一些实验，它不应该是核心实验" |
-| 改整体算法架构 | 排在最后。"首先确认这个方法是不是可以，如果完全不行，我觉得可以再看；如果它是有点效果的话，这个方法其实还可以再提升的" |
-
-### 优先级（导师建议）
-
-两条 detector 路径**平行**先做 → 遗忘维度（"另一个维度…可以先后来"）→ 最后才考虑改架构。
-
-### 流程要求
-
-- 进度随时更新到 GitHub 仓库，有需要讨论的点随时联系（腾讯会议）
-- **开始写论文时告知导师**，导师要一起看
-- 答辩 PPT 先出草稿一起过，正式答辩前再对一次
-
----
-
-## Phase 5.5 — 导师指定的 detector 重设计（当前主线，待启动）
+## Phase 5.5 — detector 重设计（当前主线）
 
 **动机**：detector 不触发 ⇒ 三层结构未激活 ⇒ 方法有效性未被验证。目标是让 detector 真正触发，
 从而**首次真正验证**校正器/适配器的效果，并争取正面结果。
@@ -1051,7 +986,7 @@ outpaces change-point detector delay"）当作论文核心 contribution，标题
 |---|---|---|---|
 | **A 对比信号** | stale context（不适应）vs sliding context（适应）两路预测的差值喂给 ADWIN | 高（TabPFN 调用翻倍，单 run ~3–4.5h） | **先做便宜的信号质量诊断**：需证明 \|Δ\| 显著大于现有 indicator 的 0.019 再上规模 |
 | **B fixed_ratio** | 提高 `CompositeWindowLoader` 固定池比例，让误差信号不被自适应吃掉 | 低（代码几乎现成，~6h 实验） | 权衡：Phase 2.5 已知 fr↑ 会掉准确率（fr=0.67 掉 2.5pp） |
-| **C 遗忘 trade-off** | 早期 regime 留出数据回测，产出 adaptation-vs-forgetting 曲线 | 中（1 天编码 + ~10h 实验） | 不依赖 detector 触发，可并行；导师点名最可能出正面结果 |
+| **C 遗忘 trade-off** | 早期 regime 留出数据回测，产出 adaptation-vs-forgetting 曲线 | 中（1 天编码 + ~10h 实验） | 不依赖 detector 触发，可并行；预期最可能产出正面结果 |
 
 **共同前提**：直接在真实数据（Electricity / Insects）上验证，不必先过合成。
 
@@ -1059,7 +994,7 @@ outpaces change-point detector delay"）当作论文核心 contribution，标题
 
 ## Phase 6 — 论文撰写（Phase 5 完成后启动）
 
-> ⚠️ **本节的定位已于 2026-06-01 导师汇报后修正，见上方「导师汇报反馈」段。**
+> ⚠️ **本节的定位已于 2026-06-01 修正，见上方「方向调整」段。**
 > 下列 framing 改动（1-5 条）中，去 PFC、生物建模声明、章节编排仍然有效；
 > 但"负面结果 methodology paper"这个**核心定位已作废**。
 
@@ -1080,7 +1015,7 @@ outpaces change-point detector delay"）当作论文核心 contribution，标题
 5. Ch9 = Real-World Validation（Phase 5 输出）
 6. Phase 2/2.5 → Appendix A
 
-完整大纲见 [phase5_plan.md](phase5_plan.md) §7.1 及 [results/phase4_final_verdict.md](results/phase4_final_verdict.md) §"论文章节大纲建议"。
+完整大纲见 phase5_plan.md（本地文档，未随仓库发布） §7.1 及 [results/phase4_final_verdict.md](results/phase4_final_verdict.md) §"论文章节大纲建议"。
 
 
 ---
@@ -1151,16 +1086,16 @@ early @local 4,352（延迟 361–447 步）。Electricity 是渐进漂移，riv
 
 **结论**：Phase 5 的 V1（"F3 在真实 abrupt drift 上完全失效"）与其机制解释
 （"TabPFN self-adaptation outpaces ADWIN"）**不成立**。检测器沉默的直接原因是
-自写实现的阈值加上段切错。导师 6/1 的判断（"是你的检测器把它拦截下来了"）得到证实。
+自写实现的阈值加上段切错。 6/1 的判断（"是你的检测器把它拦截下来了"）得到证实。
 
 ### 更正 4 与 5：计数口径与 seed 语义
 
 - "indicator detector 触发 12/15" 混用了事件数与运行数：实为 **9/15 运行**报警、共 **12 次**事件。
 - Phase 4 Day 2 的 "完美加性、无交互" 撤回：2×2 网格实际只有 3 格，两个单变量差值相加
-  等于总差是**算术恒等式**，不能检验交互。
+ 等于总差是**算术恒等式**，不能检验交互。
 - 真实数据的 5 个 seed 不是独立重复：此前全仓库无 `torch.manual_seed`，`--seed` 只喂
-  合成数据生成器。真实数据上它们是同一段数据的 5 次不受控随机重复（仅 gate/adapter
-  初始化不同）。已加 `src/utils/seeding.py` 并接进四个脚本；Phase 1 不受影响（std 本就为 0）。
+ 合成数据生成器。真实数据上它们是同一段数据的 5 次不受控随机重复（仅 gate/adapter
+ 初始化不同）。已加 `src/utils/seeding.py` 并接进四个脚本；Phase 1 不受影响（std 本就为 0）。
 
 ### 由此确定的下一步
 
