@@ -63,7 +63,7 @@
       **结果见 §5。**
 - [x] **Step 2 — 校准硬伤**：`src/utils/seeding.py` + 接进四个脚本；`real_world.py` 坐标常量改名并注明官方 vs 经验；
       订正 `progress_report.md` / `results/phase5_*.md` / `results/phase4_final_verdict.md`。
-- [ ] **Step 5 — ActionPolicy + oracle 触发** ← **进行中**（顺序已调整到 Step 3 之前，理由见 Context 6）
+- [x] **Step 5 — ActionPolicy + oracle 触发**（顺序已调整到 Step 3 之前，理由见 Context 6）
       `src/models/multi_timescale.py` + `scripts/run_phase4_a.py`：
       动作 `{route_adapter, context_reset, buffer_clear, none}` × 触发源 `{detector, oracle}`。
       **设计守卫（来自 adversarial 勘察，13 条中的关键项）**：
@@ -75,7 +75,7 @@
       - context 截断后有**最小长度 + 类别覆盖**守卫（否则单类 context 触发 SlowPrior fallback → 误报循环）
       - 输出 stem 带 action / trigger 标签，避免不同分支互相覆盖 npz
       - 报警后**只用切点之后的样本**训练新 adapter（否则在用旧概念数据训练）
-- [ ] **Step 3 — 标签与切段**：`real_world.py` 加 `label_scheme ∈ {pair_parity, pair_A_vs_B}`，
+- [ ] **Step 3 — 标签与切段** ← **下一步**：`real_world.py` 加 `label_scheme ∈ {pair_parity, pair_A_vs_B}`，
       过滤行后把 `drift_points` 重映射到 `kept_ids` 坐标；新增官方变点居中的 2500–3000 段（`aligned_v2`）；
       `--label_scheme` 穿过三个脚本 + `run_multiseed.py` 的 out_tag / npz_path / build_cmd（约 8 处调用点）。
 - [ ] **Step 4 — A0 对比信号诊断**：在已有 mid 段（含官方点 19,500），滑窗路直接用 npz 已存预测，
@@ -189,3 +189,4 @@ Limitations 必写：① 合成 rotating +1pp 未迁移到真实数据 ② Insec
 | 2026-09-06 | Step 1 检测器 | river ADWIN 包装 + 零成本离线重放。**自写版 Insects 0/20 → river 16/20 运行报警、官方漂移 recall 1.00、中位延迟 266 步**；Electricity 仍 1/15。证实导师判断：是检测器把方法拦下来了。7 个新单测 | `bd07253` |
 | 2026-09-06 | Step 2 校准 | 加 `set_global_seed` 到四个脚本；Insects 坐标常量拆成官方 / 经验两组并注明；四份文档加更正 banner（γ 数字、9/15、2×2 缺格、seed 语义）。115 passed | `2ff0ad7` |
 | 2026-09-06 | 计划归位 | Phase 5.5 计划从对话搬进本文件，成为唯一活文档；Step 5 与 Step 3 顺序对调 | — |
+| 2026-09-06 | Step 5 ActionPolicy | `--action_on_alarm {route_adapter,context_reset,buffer_clear,none}` × `--trigger_source {detector,oracle}` + `--oracle_lag`。守卫全部落地：context_reset 在**预测前**生效（与 run_baselines oracle 同一时刻表）、最小长度 + 类别覆盖、空 oracle 报错、oracle 下 detector 转影子模式不被 clear、默认动作 auto-resolve 保 Phase 3 路径、`--consolidate_on_post_alarm_data` 可把巩固推迟到报警之后、输出 stem 带分支名。18 个新单测，133 passed | `a7dfadb` |
