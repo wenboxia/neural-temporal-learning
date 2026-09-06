@@ -89,19 +89,30 @@
 |---|---|---|
 | `src/data/synthetic.py` | 3 个合成漂移生成器 | `make_dataset(name, **kw) → SyntheticDataset` |
 | `src/data/real_world.py` | Electricity / Insects 加载 + 二值化 + 无泄漏归一化 | `load_real_world(name, segment_id, insects_aligned=False)` |
-| `src/data/temporal_loader.py` | 滑动窗口 / 组合窗口（固定池+滑窗） | `TemporalWindowLoader`, `CompositeWindowLoader(fixed_ratio=)` |
+| `src/data/temporal_loader.py` | 滑窗 / 组合窗（固定池+滑窗）/ **双记忆**（Phase 5.5） | `TemporalWindowLoader`, `CompositeWindowLoader(fixed_ratio=)`, `DualMemoryLoader(short_ratio=, max_age=)` |
 | `src/models/slow_prior.py` | **Level 1**：冻结 TabPFN 包装器，懒加载权重 | `predict(X_ctx, y_ctx, X_query)` — **无状态，context 显式传入** |
 | `src/memory/buffer.py` | FIFO 工作记忆，存 `(x, error, embedding)` | `recent_errors(n)` / KNN / EMA 查询 |
 | `src/models/fast_corrector.py` | **Level 3**：KNN/EMA 残差校正，零可学习参数 | `correct(x)`, `should_consolidate(window, threshold)` |
 | `src/models/gated_ensemble.py` | **Level 2**：gate(MLP→softmax 三路) + adapter(MLP 残差) | `forward(x, y_slow, correction) → (y_final_raw, weights)` |
 | `src/consolidation/fast_to_inter.py` | 快→中巩固：把 buffer 误差 MSE 蒸馏进 adapter | `consolidate(...)`，结束后清空 buffer |
-| `src/drift/error_detector.py` | ADWIN 变点检测（1D 误差流） | `update(value) → bool`, `clear()` |
+| `src/drift/error_detector.py` | ADWIN 变点检测（1D 误差流）。**自写版阈值过严，真实数据用 river** | `make_detector(impl)`, `ADWINErrorDetector`, `RiverADWINDetector` |
 | `src/regime/adapter_library.py` | Per-regime adapter 库（`nn.ModuleDict`）+ 硬路由 | `route(...)`, `active_optimizer()` |
 | `src/models/multi_timescale.py` | **编排器**，三层串起来 | `step(X_ctx, y_ctx, x_t, y_t, t)` — **detector 输入硬编码在 ~L304** |
-| `src/utils/metrics.py` | 评估指标 | `summarize_results()`, `window_accuracy()`, balanced acc, AUC |
+| `src/utils/metrics.py` | 评估指标 + **跨方法可比口径**（Phase 5.5） | `summarize_results()`, `recovery_step(共用目标)`, `errors_avoided(从变点/从报警)` |
+| `src/utils/forgetting.py` | **适应-遗忘回测**（Phase 5.5，导师维度 C） | `carve_holdout()`, `ForgettingTracker`, `state_hash()` 零污染断言 |
+| `src/utils/seeding.py` | 全局随机种子（此前 `--seed` 从未绑定 torch） | `set_global_seed(seed)` |
 
 脚本：`run_baselines.py`(P1) / `run_phase2.py` / `run_phase3.py` / `run_phase4_a.py` / `run_multiseed.py`(批量驱动)。
-测试：`tests/` 9 个文件，**105 passed**。
+诊断脚本（Phase 5.5，零/低成本，不跑长实验）：
+`diag_detector_replay.py`（重放已存信号比较检测器实现）、
+`diag_contrast_signal.py`（导师路径 A：stale vs sliding 对比信号）。
+测试：`tests/` **14 个文件，193 passed**。
+
+**Phase 5.5 新增的实验开关**（全部有默认值，默认 = 改动前行为）：
+`--detector_impl {own,river}` / `--action_on_alarm {route_adapter,context_reset,buffer_clear,none}` /
+`--trigger_source {detector,oracle}` / `--label_scheme {pair_parity,pair_A_vs_B}` /
+`--aligned_v2` / `--context_loader {sliding,composite,dual}`。
+ROG 上的批次与中止判据见 [`ROG_RUNBOOK.md`](ROG_RUNBOOK.md)。
 
 ### 数据集清单
 
