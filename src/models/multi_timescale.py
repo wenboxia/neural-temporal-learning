@@ -48,6 +48,10 @@ from src.drift.error_detector import (
     RiverADWINDetector,
     make_detector,
 )
+
+# Phase 5.5：报警后的动作分支（判别性对照的自变量）与触发源
+ACTIONS_ON_ALARM = ("route_adapter", "context_reset", "buffer_clear", "none")
+TRIGGER_SOURCES = ("detector", "oracle")
 from src.regime.adapter_library import AdapterLibrary
 
 
@@ -101,6 +105,14 @@ class MultiTimescaleModel:
         detector_cooldown: int = 80,
         detector_impl: str = "own",
         detector_clock: int = 1,
+        # ── Phase 5.5：报警动作策略（默认值 = Phase 4 A 既有行为）──
+        action_on_alarm: "str | None" = None,
+        trigger_source: str = "detector",
+        oracle_trigger_times: "list[int] | None" = None,
+        reset_size: int = 50,
+        min_context_after_reset: int = 20,
+        clear_detector_on_alarm: bool = True,
+        consolidate_on_post_alarm_data: bool = False,
     ):
         """
         Args:
@@ -127,9 +139,77 @@ class MultiTimescaleModel:
             detector_impl:           "own"（默认，自写 Hoeffding 版 = Phase 4/5 既有行为）
                                      或 "river"（标准 ADWIN，经验方差界；Phase 5.5）
             detector_clock:          river ADWIN 每隔多少步检查一次（1 = 每步；仅 river 生效）
+            action_on_alarm:         报警后执行什么动作（Phase 5.5 判别性对照的自变量）：
+                                     "route_adapter"（默认 = Phase 4 A 行为：路由 + 巩固 active adapter）
+                                     / "context_reset"（截断 TabPFN 的滑动 context，Day 0.5 oracle 那一招）
+                                     / "buffer_clear"（只清空 FastCorrector buffer）
+                                     / "none"（只记录报警，不动作；纯消融对照）
+            trigger_source:          "detector"（默认）或 "oracle"（用已知漂移点即时触发）。
+                                     oracle 模式下 detector 仍在**影子模式**运行并记录 detector_events，
+                                     用于测量检测延迟；且**不会**被 clear()，否则延迟测不准。
+            oracle_trigger_times:    trigger_source="oracle" 时的触发时刻（全局 t 坐标）。
+                                     为空会直接报错，避免静默退化成"永不适应"。
+            reset_size:              context_reset 动作截断后的起始 context 长度（之后按
+                                     min(reset_size + (t - alarm_t), len(X_ctx)) 平滑长回去，
+                                     与 scripts/run_baselines.py --oracle_context_reset 同一时刻表）
+            min_context_after_reset: 截断后的最小 context 长度（防单类 context 触发
+                                     SlowPrior 常量 fallback → indicator 尖峰 → 误报循环）
+            clear_detector_on_alarm: 路由后是否 detector.clear()。True = Phase 4 A 既有行为。
+                                     oracle 模式下强制为 False（影子检测器必须保持独立）。
+            consolidate_on_post_alarm_data:
+                                     False（默认 = 既有行为）：报警即用 buffer 里最近
+                                     consolidation_window 个样本巩固 —— 但这些样本可能**全在切点之前**
+                                     （oracle 即时触发时尤其如此），等于用旧概念数据训练新 adapter。
+                                     True：把巩固推迟到 alarm_t + consolidation_window，
+                                     确保训练样本全部来自报警之后。
         """
         assert input_dim > 0, f"input_dim 必须 > 0，收到: {input_dim}"
         assert device == "cpu", f"当前仅支持 CPU，收到: {device}"
+
+        # ── Phase 5.5：报警动作策略校验 ────────────────────────────────
+        # action_on_alarm=None（默认）自动解析：开了 library → Phase 4 A 的 route_adapter；
+        # 没开 library（Phase 3 路径）→ "none"，动作分派整段被跳过，行为与改动前完全一致。
+        if action_on_alarm is None:
+            action_on_alarm = "route_adapter" if use_adapter_library else "none"
+        assert action_on_alarm in ACTIONS_ON_ALARM, (
+            f"action_on_alarm 必须 ∈ {ACTIONS_ON_ALARM}，收到: {action_on_alarm!r}"
+        )
+        assert trigger_source in TRIGGER_SOURCES, (
+            f"trigger_source 必须 ∈ {TRIGGER_SOURCES}，收到: {trigger_source!r}"
+        )
+        if action_on_alarm == "route_adapter" and not use_adapter_library:
+            raise ValueError(
+                "action_on_alarm='route_adapter' 需要 use_adapter_library=True"
+                "（Phase 3 路径没有 AdapterLibrary 可路由）"
+            )
+        if trigger_source == "oracle":
+            if not oracle_trigger_times:
+                # 静默的空 oracle 会让整个 run 退化成"永不适应"，却写出看似正常的 npz
+                raise ValueError(
+                    "trigger_source='oracle' 但 oracle_trigger_times 为空。"
+                    "Electricity 没有 documented 漂移点；请显式传入触发时刻，"
+                    "或改用 trigger_source='detector'。"
+                )
+            # 影子检测器必须独立于 oracle 动作，否则测不准检测延迟
+            clear_detector_on_alarm = False
+        assert reset_size > 0, f"reset_size 必须 > 0，收到: {reset_size}"
+        assert min_context_after_reset > 0, (
+            f"min_context_after_reset 必须 > 0，收到: {min_context_after_reset}"
+        )
+
+        self.action_on_alarm = action_on_alarm
+        self.trigger_source = trigger_source
+        self.oracle_trigger_times = sorted(int(x) for x in (oracle_trigger_times or []))
+        self._oracle_set = set(self.oracle_trigger_times)
+        self.reset_size = reset_size
+        self.min_context_after_reset = min_context_after_reset
+        self.clear_detector_on_alarm = clear_detector_on_alarm
+        self.consolidate_on_post_alarm_data = consolidate_on_post_alarm_data
+        self.alarm_events: list = []          # 实际驱动动作的报警时刻
+        self.action_events: list = []         # list[(t, action)]，动作真正执行的时刻
+        self._last_alarm_t: int | None = None
+        self._pending_consolidation_t: int | None = None
+        self.n_context_truncations: int = 0
 
         self.input_dim = input_dim
         self.consolidation_window = consolidation_window
@@ -257,6 +337,16 @@ class MultiTimescaleModel:
         )
         y_t = float(y_t)
 
+        # ── Step 0：oracle 报警 + 预测前动作（Phase 5.5）──────────────
+        # oracle 报警必须在 predict 之前登记并生效，才能与
+        # scripts/run_baselines.py --oracle_context_reset 用同一时刻表
+        # （那里在 t == drift_point 当步就已截断）。detector 报警只能在观测标签之后
+        # 产生，所以它的动作从下一步开始生效 —— 这是检测本身的固有延迟，不是 bug。
+        if self.trigger_source == "oracle" and t in self._oracle_set:
+            self._register_alarm(t)
+        if self.action_on_alarm == "context_reset" and self._last_alarm_t is not None:
+            X_ctx, y_ctx = self._apply_context_reset(X_ctx, y_ctx, t)
+
         # ── Step 1：慢层预测（TabPFN in-context learning）────────────
         X_query_2d = x_t[np.newaxis, :]                   # (1, input_dim)
         proba = self.slow_prior.predict_proba(X_ctx, y_ctx, X_query_2d)
@@ -306,25 +396,40 @@ class MultiTimescaleModel:
         #
         # routing 后 detector.clear() 让 detector 从新 regime 重新积累。
         # buffer 在 consolidate() 内部统一被 reset。
-        if self.use_adapter_library and self.detector is not None:
-            # Option B: feed 0/1 错误指示器 = int((y_final >= 0.5) != y_t)。
+        # 诊断信号始终落盘（与是否开 library、用哪种触发源无关），
+        # 这样每个动作分支的 run 都能拿到同口径的 indicator 流做事后重放。
+        self.abs_error_history.append(abs(error))
+        y_pred_hard = 1 if torch.clamp(y_final_raw.detach(), 0.0, 1.0).item() >= 0.5 else 0
+        indicator = int(y_pred_hard != int(y_t))
+        self.indicator_history.append(indicator)
+
+        if self.detector is not None:
+            # Option B: detector 输入 = 0/1 错误指示器。
             # raw error 流（mean≈0）和 |error| 流（mean≈0.30 across regimes）的 mean shift
             # 都被 TabPFN sliding-context 自适应消化掉，ADWIN 结构性看不到信号。
-            # indicator 直接是错误率信号：regime 切换后 acc 80%→60% → mean 0.20→0.40，
-            # mean shift ≈ 0.20，远大于 |error| 的 0.03。Step 1 sanity check 已证 δ=0.002 可触发。
-            # abs_error 仍 dump 供 raw/abs/indicator 三段对比。
-            abs_e = abs(error)
-            self.abs_error_history.append(abs_e)
-            y_pred_hard = 1 if torch.clamp(y_final_raw.detach(), 0.0, 1.0).item() >= 0.5 else 0
-            indicator = int(y_pred_hard != int(y_t))
-            self.indicator_history.append(indicator)
+            # ⚠️ Phase 5.5：真实数据上 indicator 位移只有 ~0.10，自写 ADWIN 的值域 Hoeffding 界
+            # 要求 ≥0.209 → 结构性触发不了。用 --detector_impl river 换经验方差界可触发。
+            #
+            # detector 始终运行；oracle 模式下它是**影子模式**（只记录 detector_events，
+            # 不驱动动作、也不被 clear），这样同一个 run 里既有 oracle 动作效果，
+            # 又有真实检测延迟可测。
             detector_drift = self.detector.update(float(indicator))
             if detector_drift:
                 self.detector_events.append(t)
-            should_trigger = detector_drift
+            if self.trigger_source == "detector" and detector_drift:
+                self._register_alarm(t)
         else:
             detector_drift = False
-            should_trigger = (
+
+        # 本步是否有报警驱动动作（oracle 报警在 Step 0 已登记）
+        alarm_now = self._last_alarm_t == t
+
+        if self.use_adapter_library:
+            should_trigger = alarm_now
+        else:
+            # Phase 3 v2+B+F 路径：bias-threshold + cooldown（行为与 Phase 5.5 改动前一致）。
+            # 若显式指定了 oracle / 非默认动作，alarm_now 也参与触发。
+            should_trigger = alarm_now or (
                 t - self._last_consolidation_t >= self.consolidation_cooldown
                 and self.fast_corrector.should_consolidate(
                     window=self.consolidation_window,
@@ -332,14 +437,47 @@ class MultiTimescaleModel:
                 )
             )
 
-        if should_trigger:
+        # ── Step 6b：报警后的动作分派（Phase 5.5）─────────────────────
+        # action_on_alarm="route_adapter" + trigger_source="detector" 是既有 Phase 4 A 路径；
+        # use_adapter_library=False 时 should_trigger 来自 bias-threshold，走同一段巩固逻辑。
+        if alarm_now:
+            self.action_events.append((t, self.action_on_alarm))
+            if self.action_on_alarm == "buffer_clear":
+                self.fast_corrector.reset()
+            elif self.action_on_alarm == "context_reset":
+                # 动作本体在 Step 0 生效（下一步预测前截断 context），这里无事可做
+                pass
+            elif self.action_on_alarm == "none":
+                pass
+
+        # consolidate_on_post_alarm_data=True 时把巩固推迟到 alarm_t + consolidation_window，
+        # 保证训练样本全部来自报警之后（oracle 即时触发时 buffer 里全是切点**之前**的样本，
+        # 直接巩固等于用旧概念数据训练新 adapter）。
+        do_route = (
+            should_trigger
+            and self.action_on_alarm == "route_adapter"
+            and self.adapter_library is not None
+        )
+        if do_route and self.consolidate_on_post_alarm_data:
+            self._pending_consolidation_t = t + self.consolidation_window
+            do_route = False
+        elif (
+            self._pending_consolidation_t is not None
+            and t >= self._pending_consolidation_t
+        ):
+            self._pending_consolidation_t = None
+            do_route = True
+
+        legacy_bias_trigger = should_trigger and not self.use_adapter_library
+
+        if do_route or legacy_bias_trigger:
             buf_len = len(self.fast_corrector.buffer)
             if buf_len >= self.consolidation_window:
                 X_recent = self.fast_corrector.buffer.recent_features(
                     self.consolidation_window
                 )
-                # detector 触发先做 routing：评估现有 / 新建 → 切 active
-                if detector_drift and self.adapter_library is not None:
+                # 报警触发先做 routing：评估现有 / 新建 → 切 active
+                if do_route and self.adapter_library is not None:
                     errs_recent = self.fast_corrector.buffer.recent_errors(
                         self.consolidation_window
                     )
@@ -347,7 +485,8 @@ class MultiTimescaleModel:
                         X_recent, errs_recent, t=t,
                     )
                     self.route_events.append((t, action, active_id))
-                    self.detector.clear()
+                    if self.clear_detector_on_alarm and self.detector is not None:
+                        self.detector.clear()
 
                 # consolidate：use_adapter_library=True 时用 active adapter 的 optimizer
                 opt = (
@@ -381,6 +520,46 @@ class MultiTimescaleModel:
     def reset_fast(self) -> None:
         """手动清空快速校正器缓冲区（如在已知漂移点处调用）。"""
         self.fast_corrector.reset()
+
+    # ------------------------------------------------------------------
+    # Phase 5.5：报警与动作
+    # ------------------------------------------------------------------
+
+    def _register_alarm(self, t: int) -> None:
+        """登记一次**驱动动作**的报警（区别于 detector_events：后者含影子模式的观测）。"""
+        self._last_alarm_t = t
+        self.alarm_events.append(t)
+
+    def _apply_context_reset(
+        self, X_ctx: np.ndarray, y_ctx: np.ndarray, t: int,
+    ) -> "tuple[np.ndarray, np.ndarray]":
+        """截断 TabPFN 的 context 到报警之后的部分，长度按时间平滑长回全窗。
+
+        时刻表与 scripts/run_baselines.py --oracle_context_reset 完全一致：
+            k = min(reset_size + (t - alarm_t), len(X_ctx))
+
+        两道守卫：
+          1. k ≥ min_context_after_reset —— 太短的 context 会让 TabPFN 极不稳定；
+          2. 截断后至少有 2 个类别 —— 否则 SlowPrior 走常量 fallback（proba 全 0/1），
+             error 立刻变成 ±1、indicator 尖峰，反过来制造误报循环。
+             不满足就成倍放宽 k，直到有 2 类或用尽整窗。
+        """
+        assert self._last_alarm_t is not None
+        n = len(X_ctx)
+        k = min(self.reset_size + (t - self._last_alarm_t), n)
+        k = max(k, min(self.min_context_after_reset, n))
+        if k >= n:
+            return X_ctx, y_ctx
+
+        X_r, y_r = X_ctx[-k:], y_ctx[-k:]
+        while len(np.unique(y_r)) < 2 and k < n:
+            k = min(k * 2, n)
+            X_r, y_r = X_ctx[-k:], y_ctx[-k:]
+        if k >= n:
+            return X_ctx, y_ctx
+
+        self.n_context_truncations += 1
+        return X_r, y_r
 
     def __repr__(self) -> str:
         return (

@@ -31,7 +31,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.data.real_world import load_real_world
 from src.data.synthetic import make_dataset
 from src.data.temporal_loader import TemporalWindowLoader
-from src.models.multi_timescale import MultiTimescaleModel
+from src.models.multi_timescale import (
+    ACTIONS_ON_ALARM,
+    TRIGGER_SOURCES,
+    MultiTimescaleModel,
+)
 from src.utils.metrics import summarize_results
 from src.utils.seeding import set_global_seed
 
@@ -117,6 +121,25 @@ def parse_args():
     parser.add_argument("--detector_clock", type=int, default=1,
                         help="river ADWIN 每隔多少步检查一次（仅 --detector_impl river 生效）")
 
+    # ── Phase 5.5：报警动作策略（判别性对照的自变量）────────────────────
+    parser.add_argument("--action_on_alarm", type=str, default="route_adapter",
+                        choices=list(ACTIONS_ON_ALARM),
+                        help="报警后做什么：route_adapter（默认=Phase 4 A）/ "
+                             "context_reset（截断 TabPFN context）/ buffer_clear / none")
+    parser.add_argument("--trigger_source", type=str, default="detector",
+                        choices=list(TRIGGER_SOURCES),
+                        help="detector（默认）或 oracle（用数据集已知漂移点即时触发；"
+                             "detector 转入影子模式仍记录延迟）")
+    parser.add_argument("--oracle_lag", type=int, default=0,
+                        help="oracle 触发相对真实漂移点的滞后步数（0=即时，用于扫检测延迟的影响）")
+    parser.add_argument("--reset_size", type=int, default=50,
+                        help="context_reset 动作截断后的起始 context 长度")
+    parser.add_argument("--min_context_after_reset", type=int, default=20,
+                        help="截断后的最小 context 长度（防单类 context 触发常量 fallback）")
+    parser.add_argument("--consolidate_on_post_alarm_data", action="store_true",
+                        help="把巩固推迟到 alarm_t + consolidation_window，"
+                             "确保训练样本全部来自报警之后")
+
     return parser.parse_args()
 
 
@@ -166,6 +189,7 @@ def main():
         dataset = make_dataset(args.dataset, **kwargs)
     print(f"漂移点 ({len(dataset.drift_points)} 个): {dataset.drift_points}")
 
+
     loader = TemporalWindowLoader(
         dataset.X, dataset.y,
         context_size=args.context_size,
@@ -174,6 +198,30 @@ def main():
     total_steps = len(loader)
     if args.max_eval_steps is not None:
         total_steps = min(total_steps, args.max_eval_steps)
+
+    # ── Phase 5.5：oracle 触发时刻（漂移点 + lag），带守卫 ────────────────
+    oracle_times = None
+    if args.trigger_source == "oracle":
+        if not dataset.drift_points:
+            raise SystemExit(
+                f"[error] --trigger_source oracle 但数据集 {args.dataset} 没有 documented 漂移点"
+                "（Electricity 是渐进漂移，无 crisp 切点）。空 oracle 会静默退化成"
+                "'永不适应'并写出看似正常的 npz，故直接报错。"
+            )
+        oracle_times = [int(d) + args.oracle_lag for d in dataset.drift_points]
+        # 落在评估范围之外的触发时刻等于没有触发 —— 必须显式暴露
+        last_t = args.context_size + total_steps - 1
+        in_range = [t for t in oracle_times if args.context_size <= t <= last_t]
+        if not in_range:
+            raise SystemExit(
+                f"[error] oracle 触发时刻 {oracle_times} 全部落在评估范围 "
+                f"[{args.context_size}, {last_t}] 之外（--max_eval_steps 太小？）"
+            )
+        if len(in_range) < len(oracle_times):
+            print(f"  [warn] {len(oracle_times) - len(in_range)} 个 oracle 触发点超出评估范围，被忽略")
+        oracle_times = in_range
+        print(f"  [oracle] 触发时刻 (lag={args.oracle_lag}): {oracle_times}")
+    print(f"action_on_alarm: {args.action_on_alarm} | trigger_source: {args.trigger_source}")
 
     # ── 初始化 MultiTimescaleModel（开 use_adapter_library）──────────────
     model = MultiTimescaleModel(
@@ -200,6 +248,13 @@ def main():
         detector_cooldown=args.detector_cooldown,
         detector_impl=args.detector_impl,
         detector_clock=args.detector_clock,
+        # ── Phase 5.5 ──
+        action_on_alarm=args.action_on_alarm,
+        trigger_source=args.trigger_source,
+        oracle_trigger_times=oracle_times,
+        reset_size=args.reset_size,
+        min_context_after_reset=args.min_context_after_reset,
+        consolidate_on_post_alarm_data=args.consolidate_on_post_alarm_data,
     )
 
     # ── Prequential 主循环 ──────────────────────────────────────────────
@@ -356,7 +411,21 @@ def main():
     axes[2].legend(fontsize=9, loc="upper left")
 
     plt.tight_layout()
-    stem = args.out_tag if args.out_tag is not None else f"phase4_a_{args.dataset}"
+    # 默认 stem 带上动作 / 触发源 / detector 实现，避免不同分支互相覆盖 npz。
+    # 显式 --out_tag 优先（multiseed 驱动依赖它）。
+    if args.out_tag is not None:
+        stem = args.out_tag
+    else:
+        stem = f"phase4_a_{args.dataset}"
+        variant = []
+        if args.action_on_alarm != "route_adapter":
+            variant.append(args.action_on_alarm)
+        if args.trigger_source != "detector":
+            variant.append(f"{args.trigger_source}lag{args.oracle_lag}")
+        if args.detector_impl != "own":
+            variant.append(args.detector_impl)
+        if variant:
+            stem += "_" + "_".join(variant)
     png_path = os.path.join(args.results_dir, f"{stem}.png")
     plt.savefig(png_path, dpi=150, bbox_inches="tight")
     plt.close()
@@ -395,6 +464,15 @@ def main():
         library_init_strategy=np.array([args.library_init_strategy]),
         detector_impl=np.array([args.detector_impl]),
         detector_clock=np.array([args.detector_clock]),
+        # ── Phase 5.5 诊断字段 ──
+        action_on_alarm=np.array([args.action_on_alarm]),
+        trigger_source=np.array([args.trigger_source]),
+        oracle_lag=np.array([args.oracle_lag]),
+        oracle_trigger_times=np.array(oracle_times if oracle_times else [], dtype=np.int64),
+        alarm_events=np.array(model.alarm_events, dtype=np.int64),
+        action_t=np.array([a[0] for a in model.action_events], dtype=np.int64),
+        n_context_truncations=np.array([model.n_context_truncations]),
+        consolidate_on_post_alarm_data=np.array([int(args.consolidate_on_post_alarm_data)]),
     )
     print(f"数值结果已保存至: {npz_path}")
 
