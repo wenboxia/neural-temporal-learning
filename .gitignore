@@ -65,3 +65,32 @@ logs/
 # Phase 5 smoke-test residue (no paper value)
 results/smoke/
 results/smoke_oracle.png
+
+# ─────────────────────────────────────────────────────────────
+# Phase 5.5 仓库精简（2026-09-06）
+# 决策：GitHub 上只保留 README + 实验叙事 + 代码 + 结果图。
+# 过程性文档（计划、待办、AI 指令、运行手册）与导师相关材料一律**本地保留**、
+# 不进公开仓库。文件不删除，只是取消追踪。
+#
+# ⚠️ 顺序要求：这些规则必须**先于**任何文件移动提交，
+# 否则移动后的文件会短暂处于可提交状态。
+# ⚠️ 下面前三条是目录规则（含斜杠 = 路径锚定），移动文件进去后才生效；
+# 私有文件本身另有不含斜杠的文件名规则（*.txt / *.pdf / advisor_demo_*.md），
+# 那些规则在任意深度都匹配，移动不会失效。
+private/
+attic/
+docs/
+
+# results 子目录：原规则 results/smoke/ 与 results/oracle_summary.md 等
+# 都是根锚定的，文件移进子目录后会失效，这里补上新路径。
+results/archive/
+results/gpu_check/
+
+# 过程性文档（本地保留，不上传）
+start_prompt.md
+todo.md
+CLAUDE.md
+ROG_RUNBOOK.md
+implementation_plan_v2.md
+phase4_plan.md
+phase5_plan.md
