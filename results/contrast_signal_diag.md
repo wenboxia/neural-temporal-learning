@@ -8,14 +8,14 @@
 
 | segment | signal | alarms | recall | false alarms | median delay | max shift |
 |---|---|---|---|---|---|---|
-| d2_19500 | `contrast_prob` | 1 | 1/1 | 0 | 31 | 0.491 |
-| d2_19500 | `contrast_hard` | 1 | 1/1 | 0 | 37 | 0.500 |
-| d2_19500 | `indicator` | 1 | 1/1 | 0 | 18 | 0.240 |
-| d2_19500 | `pred1` | 1 | 1/1 | 0 | 37 | 0.500 |
 | d3_33240 | `contrast_prob` | 1 | 1/1 | 0 | -45 | 0.028 |
 | d3_33240 | `contrast_hard` | 1 | 1/1 | 0 | -22 | 0.085 |
 | d3_33240 | `indicator` | 0 | 0/1 | 0 | — | 0.165 |
 | d3_33240 | `pred1` | 1 | 1/1 | 0 | -31 | 0.340 |
+| d4_double | `contrast_prob` | 2 | 1/2 | 1 | 68 | 0.278 |
+| d4_double | `contrast_hard` | 2 | 1/2 | 1 | 355 | 0.120 |
+| d4_double | `indicator` | 2 | 1/2 | 1 | 48 | 0.295 |
+| d4_double | `pred1` | 2 | 1/2 | 1 | 26 | 0.480 |
 | d0_control | `contrast_prob` | 0 | — | 0 | — | — |
 | d0_control | `contrast_hard` | 0 | — | 0 | — | — |
 | d0_control | `indicator` | 0 | — | 0 | — | — |
@@ -25,14 +25,14 @@
 
 | segment | signal | drifts (local) | alarms (local) | delays |
 |---|---|---|---|---|
-| d2_19500 | `contrast_prob` | [767] | [798] | [31] |
-| d2_19500 | `contrast_hard` | [767] | [804] | [37] |
-| d2_19500 | `indicator` | [767] | [785] | [18] |
-| d2_19500 | `pred1` | [767] | [804] | [37] |
 | d3_33240 | `contrast_prob` | [1540] | [1495] | [-45] |
 | d3_33240 | `contrast_hard` | [1540] | [1518] | [-22] |
 | d3_33240 | `indicator` | [1540] | [] | [] |
 | d3_33240 | `pred1` | [1540] | [1509] | [-31] |
+| d4_double | `contrast_prob` | [880, 1432] | [458, 948] | [68] |
+| d4_double | `contrast_hard` | [880, 1432] | [525, 1235] | [355] |
+| d4_double | `indicator` | [880, 1432] | [512, 928] | [48] |
+| d4_double | `pred1` | [880, 1432] | [451, 906] | [26] |
 | d0_control | `contrast_prob` | [] | [] | [] |
 | d0_control | `contrast_hard` | [] | [] | [] |
 | d0_control | `indicator` | [] | [] | [] |

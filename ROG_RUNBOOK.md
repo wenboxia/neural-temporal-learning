@@ -45,7 +45,7 @@ python -c "import torch; print('cuda:', torch.cuda.is_available(), torch.cuda.ge
 ```
 
 ```bash
-pytest tests/ -q        # 应 193 passed
+pytest tests/ -q        # 应 206 passed
 ```
 
 **Insects 数据**：首次运行会从 Google Drive 下载约 14 MB 到 `~/.cache/insects_drift/`，
@@ -63,12 +63,12 @@ pytest tests/ -q        # 应 193 passed
 上规模之前先确认两件事：速度真的提升了，且结果与 CPU 一致到可接受范围。
 
 ```bash
-python scripts/run_phase4_a.py --dataset insects --dataset_source real --segment_id d2_19500 --aligned_v2 --label_scheme pair_A_vs_B --context_size 200 --n_estimators 1 --max_eval_steps 700 --detector_impl river --action_on_alarm context_reset --trigger_source oracle --results_dir results/gpu_check
+python scripts/run_phase4_a.py --dataset insects --dataset_source real --segment_id d3_33240 --aligned_v2 --label_scheme pair_A_vs_B --context_size 200 --n_estimators 1 --max_eval_steps 1800 --detector_impl river --detector_input pred1 --action_on_alarm context_reset --trigger_source oracle --results_dir results/gpu_check
 ```
 
-MacBook CPU 上同样命令耗时 **41 s**、总体准确率 **0.9471**、漂移前 1.0000 / 漂移后 0.7500、
-detector 触发 1 次。ROG 上准确率应一致或极接近；耗时应明显更短。
+ROG 上的准确率应与 MacBook CPU 一致或极接近，耗时应明显更短。
 **若准确率差异 > 0.5pp，先停下排查，不要开跑批量。**
+（用 `d3_33240` 而不是 `d2_19500`：后者在 `pair_A_vs_B` 下漂移前是单类，加载器会拒绝，见 §6.5。）
 
 ---
 
@@ -77,11 +77,11 @@ detector 触发 1 次。ROG 上准确率应一致或极接近；耗时应明显�
 目的：确认新的标签方案 + 官方变点居中的切段**有 headroom**，否则后面都白做。
 
 ```bash
-python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --configs phase1 --seeds 42 --n_parallel 2 --variant_tag v2AvsB_base --partial_tag _p55_base
+python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --segments d3_33240,d4_double,d0_control --configs phase1 --seeds 42 --n_parallel 2 --variant_tag v2AvsB_base --partial_tag _p55_base
 ```
 
 ```bash
-python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --configs phase1 --seeds 42 --n_parallel 2 --variant_tag v2AvsB_dual --partial_tag _p55_dual --extra_args "--context_loader dual --short_ratio 0.5 --long_max_age 2000"
+python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --segments d3_33240,d4_double,d0_control --configs phase1 --seeds 42 --n_parallel 2 --variant_tag v2AvsB_dual --partial_tag _p55_dual --extra_args "--context_loader dual --short_ratio 0.5 --long_max_age 2000"
 ```
 
 **中止判据（不满足就停下汇报，不要往下跑）**：
@@ -98,11 +98,15 @@ Phase 1 在真实数据上是确定性的（TabPFN 冻结、context 固定），
 **这一批决定论文主线。** 它回答的是："报警之后做动作，到底值不值？"
 
 ```bash
-python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --configs phase4a --seeds 42 --n_parallel 2 --variant_tag v2AvsB_oracle_ctxreset --partial_tag _p55_or --extra_args "--detector_impl river --trigger_source oracle --action_on_alarm context_reset"
+python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --segments d3_33240,d4_double,d0_control --configs phase4a --seeds 42 --n_parallel 2 --variant_tag v2AvsB_oracle_ctxreset --partial_tag _p55_or --extra_args "--detector_impl river --trigger_source oracle --action_on_alarm context_reset"
 ```
 
 四个动作分支各跑一次（`--action_on_alarm` 换成 `route_adapter` / `buffer_clear` / `none`，
 `--variant_tag` 相应改名），再把 `--trigger_source` 换成 `detector` 重跑一遍同样四个分支。
+
+**检测输入也要扫**（Step 4 诊断结论，见 `todo.md` §5.1）：`--detector_input` 取
+`pred1`（**首选**：召回 2/3、延迟最短、无需第二路预测）、`contrast_prob`（导师路径 A）、
+`indicator`（现状对照，召回仅 1/3）。只在 `--trigger_source detector` 时有意义。
 `none` + `oracle` 是关键对照组：它与 `none` + `detector` 应当完全一致，可用来验证
 动作分派没有意外副作用。
 
@@ -125,7 +129,7 @@ alarm_times=<npz 里的 alarm_events>)`，看 `errors_avoided_from_alarm` ——
 批次二有增益才跑。phase4a（检测器驱动）vs phase1 vs 双记忆基线，3 个 seed。
 
 ```bash
-python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --configs phase1,phase3,phase4a --seeds 42,123,456 --n_parallel 2 --variant_tag v2AvsB_river_full --partial_tag _p55_full --extra_args "--detector_impl river"
+python scripts/run_multiseed.py --dataset_source real --datasets insects --aligned_v2 --label_scheme pair_A_vs_B --segments d3_33240,d4_double,d0_control --configs phase1,phase3,phase4a --seeds 42,123,456 --n_parallel 2 --variant_tag v2AvsB_river_full --partial_tag _p55_full --extra_args "--detector_impl river"
 ```
 
 ---
@@ -147,6 +151,15 @@ buffer / 训练**），`ForgettingTracker` 在检查点回测，产出横轴适�
 
 胜出配置补齐 5 seeds，做 paired t-test。若批次二/三有增益，此时再评估要不要投
 45–60 工时做 6 类原生改造（见 `todo.md` §0 第 8 条）。
+
+---
+
+## 6.5 ⚠️ 只能用有效段
+
+`--segments` **必须**显式写 `d3_33240,d4_double,d0_control`。
+`d1_14352`（两种标签方案）与 `d2_19500`（`pair_A_vs_B`）漂移前是单一类别 ——
+官方变点 14,352 落在一段 1,754 条连续 class 5 的末尾，那里温度漂移与标签构成变化完全混淆。
+加载器默认会对这些组合直接报错，不必担心误用，但段列表写全五段会中途失败浪费时间。
 
 ---
 
