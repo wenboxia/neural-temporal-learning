@@ -75,22 +75,23 @@
       - context 截断后有**最小长度 + 类别覆盖**守卫（否则单类 context 触发 SlowPrior fallback → 误报循环）
       - 输出 stem 带 action / trigger 标签，避免不同分支互相覆盖 npz
       - 报警后**只用切点之后的样本**训练新 adapter（否则在用旧概念数据训练）
-- [ ] **Step 3 — 标签与切段** ← **下一步**：`real_world.py` 加 `label_scheme ∈ {pair_parity, pair_A_vs_B}`，
+- [x] **Step 3 — 标签与切段**：`real_world.py` 加 `label_scheme ∈ {pair_parity, pair_A_vs_B}`，
       过滤行后把 `drift_points` 重映射到 `kept_ids` 坐标；新增官方变点居中的 2500–3000 段（`aligned_v2`）；
       `--label_scheme` 穿过三个脚本 + `run_multiseed.py` 的 out_tag / npz_path / build_cmd（约 8 处调用点）。
-- [ ] **Step 4 — A0 对比信号诊断**：在已有 mid 段（含官方点 19,500），滑窗路直接用 npz 已存预测，
+- [x] **Step 4 — A0 对比信号诊断**（结果见 §5.1）：在已有 mid 段（含官方点 19,500），滑窗路直接用 npz 已存预测，
       stale 路一次**批量** TabPFN 调用（已实测逐样本独立、批量快 7.4×，成本≈0）；
       比较 contrast / indicator / P(y) 三种信号在 river ADWIN 下的**延迟与误报** → `scripts/diag_contrast_signal.py`。
-- [ ] **Step 6 — 遗忘回测** `src/utils/forgetting.py`：段首留出集不进 context / buffer / 训练；
+- [x] **Step 6 — 遗忘回测** `src/utils/forgetting.py`：段首留出集不进 context / buffer / 训练；
       回测前后**模型状态哈希不变**的单测。
-- [ ] **Step 7 — 双记忆 loader + fixed_ratio**：`CompositeWindowLoader` 接进 `run_phase4_a.py`
+- [x] **Step 7 — 双记忆 loader + fixed_ratio**：`CompositeWindowLoader` 接进 `run_phase4_a.py`
       （照 `run_baselines.py:122-140`）；`DualMemoryLoader`（短 FIFO + 类均衡长期库，**加年龄上限**，
       yield-then-push）；`run_multiseed.py` 的 out_tag 带 fr / dual，避免 skip-existing 误跳。
       ⚠️ 勘察警告：在类别均衡的流上朴素双记忆会退化成纯滑窗，长期库必须有年龄上限才有意义。
-- [ ] **Step 8 — metrics**：共用恢复目标 A\*（同段同 seed 的 Phase 1）+ "固定窗口内少犯错误数"
+- [x] **Step 8 — metrics**：共用恢复目标 A\*（同段同 seed 的 Phase 1）+ "固定窗口内少犯错误数"
       （从变点起算 / 从报警起算）；保留旧字段以便与既有结果对比。
       ⚠️ 现有 `adaptation_speed` 用各方法**自己**的漂移前均值 ×0.95 作门槛，准确率低的方法反而更容易"恢复"。
-- [ ] **Step 9 — ROG 运行清单 + WSL2 安装脚本**；回头更新 `start_prompt.md`。
+- [x] **Step 9 — ROG 运行清单**：[`ROG_RUNBOOK.md`](ROG_RUNBOOK.md)（含 WSL2 安装、GPU 校准、五个批次、中止判据）。
+- [ ] 回头更新 `start_prompt.md` 的架构章节（当前只加了更正 banner）
 
 ---
 
@@ -113,10 +114,35 @@
 
 ## 4. 验证方式
 
-- `pytest tests/` 全绿（Step 2 后为 115 passed）+ 每步新增单测。
+- `pytest tests/` 全绿（**当前 193 passed**）+ 每步新增单测。
 - Step 1 的 river 重放数字可复现（mid 段官方点 local 3,500，延迟 145–172 步）。
 - Step 4 出 A0 图与延迟表；**contrast 不优于 indicator 也如实记录**。
 - Step 5–8 只跑 `--max_eval_steps 100` smoke，不在 MacBook 上跑长实验。
+
+---
+
+## 5.1 Step 4 结果：对比信号 vs 错误指示器（2026-09-06）
+
+在官方变点居中的新段上（`pair_A_vs_B`，river ADWIN δ=0.002），四种检测输入并排：
+
+| segment | 信号 | 检出 | 延迟 | 变点处均值位移 |
+|---|---|---|---|---|
+| d2_19500 | contrast_prob | ✓ | 31 | **0.491** |
+| d2_19500 | contrast_hard | ✓ | 37 | **0.500** |
+| d2_19500 | indicator（现状）| ✓ | **18** | 0.240 |
+| d3_33240 | contrast_prob | 早报 45 步 | — | 0.028 |
+| d3_33240 | indicator | **未检出** | — | 0.165 |
+| d0_control（无漂移）| 全部四种 | 0 报警 | — | — |
+
+**结论（混合，如实记录）**：
+- 导师路径 A 的前提**在 d2 成立**：对比信号的位移是 indicator 的 **2×**（0.49 vs 0.24）；
+- 但**延迟没变短**（31–37 vs 18 步），且在 d3 上对比信号反而**更弱**（0.028 vs 0.165）；
+- d0_control 上四种信号**零误报**，说明不是靠放宽阈值换来的检出；
+- **成本前提被推翻**：stale 路一次批量算完只要 **1–5 s**，而 sliding 路逐步要 **324–754 s**。
+  路径 A 的额外成本 ≈ 0，todo 里原先"实验成本翻倍"的估计作废。
+
+⚠️ d3 的三次报警都落在标注点**之前** 22–45 步。Souza 的变点标的是温度**设定**切换时刻，
+传感器读数会提前变，所以判据已改为允许早报（`--pre_tolerance`）。
 
 ---
 
@@ -189,4 +215,9 @@ Limitations 必写：① 合成 rotating +1pp 未迁移到真实数据 ② Insec
 | 2026-09-06 | Step 1 检测器 | river ADWIN 包装 + 零成本离线重放。**自写版 Insects 0/20 → river 16/20 运行报警、官方漂移 recall 1.00、中位延迟 266 步**；Electricity 仍 1/15。证实导师判断：是检测器把方法拦下来了。7 个新单测 | `bd07253` |
 | 2026-09-06 | Step 2 校准 | 加 `set_global_seed` 到四个脚本；Insects 坐标常量拆成官方 / 经验两组并注明；四份文档加更正 banner（γ 数字、9/15、2×2 缺格、seed 语义）。115 passed | `2ff0ad7` |
 | 2026-09-06 | 计划归位 | Phase 5.5 计划从对话搬进本文件，成为唯一活文档；Step 5 与 Step 3 顺序对调 | — |
+| 2026-09-06 | Step 3 标签与切段 | `label_scheme {pair_parity, pair_A_vs_B}` + `aligned_v2` 官方变点居中 5 段（含无漂移对照段 d0_control）。**关键正确性点**：丢行后漂移坐标按保留行累计数重映射（d2 的 1500→767、d4 的 1082/1910→880/1432），否则 oracle 会触发在错样本上。驱动加 `variant_tag` 防 skip-existing 误跳、`--extra_args` 只传给认识的脚本。15 个新单测 | `ae62fc2` |
+| 2026-09-06 | Step 6+4 遗忘/对比信号 | `src/utils/forgetting.py`（留出集剔除 + state_hash 零污染断言 + best-minus-final 遗忘定义）；`scripts/diag_contrast_signal.py`。17 个新单测 | `3327095` |
+| 2026-09-06 | Step 7 双记忆 | `DualMemoryLoader`（类均衡淘汰 + 年龄上限）作 KDD 2026 文献基线；**实测确认退化性质**：类别均衡时与纯滑窗 context 完全相同，只在单类长段才分歧（单类段深处保有 25 条少数类样本，滑窗为 0）。14 个新单测 | `19d9316` |
+| 2026-09-06 | Step 8 metrics | 共用恢复目标 A\* + errors_avoided（可从变点或**报警时刻**起算）；撤掉"各方法自己的门槛"。14 个新单测，193 passed | `18ee2d9` |
+| 2026-09-06 | Step 9 ROG 手册 | [`ROG_RUNBOOK.md`](ROG_RUNBOOK.md)：MPS 实测比 CPU 慢 5.6× 的依据、WSL2 安装、GPU 校准基准（41s/0.9471）、五个批次含中止判据 | `25baf51` |
 | 2026-09-06 | Step 5 ActionPolicy | `--action_on_alarm {route_adapter,context_reset,buffer_clear,none}` × `--trigger_source {detector,oracle}` + `--oracle_lag`。守卫全部落地：context_reset 在**预测前**生效（与 run_baselines oracle 同一时刻表）、最小长度 + 类别覆盖、空 oracle 报错、oracle 下 detector 转影子模式不被 clear、默认动作 auto-resolve 保 Phase 3 路径、`--consolidate_on_post_alarm_data` 可把巩固推迟到报警之后、输出 stem 带分支名。18 个新单测，133 passed | `a7dfadb` |
