@@ -1,5 +1,18 @@
 # Phase 4 Day 1.5 + Day 2 — Final Verdict（五段终极对照）
 
+> ⚠️ **Phase 5.5 更正（2026-09-06）** —— 原始实验数据不变，以下**分析表述**已更正：
+> 1. **"完美加性，无显著交互" 撤回**。2×2 网格实际只有 3 格（fit=0.05 × warm 那格标注为"留空"）。
+>    三格之下，两个单变量差值相加**必然**等于总差 —— 这是算术恒等式，不是交互检验。
+>    检验交互需要第 4 格。本文件中所有 "无交互 / 完美加性" 的措辞应读作 "缺格，未检验"。
+> 2. **"indicator detector 触发 12/15" 是事件数与运行数混用**：实为 **9/15 运行**报警、
+>    共 **12 次**事件（regime 5/5 运行 7 事件、combined 4/5 运行 5 事件、rotating 0/5）。
+>    warmstart 行同理（12 事件 ≠ 12 运行）。
+> 3. **F1/F2 的机制解释被削弱**：detector 沉默的主因是自写 ADWIN 的值域 Hoeffding 界
+>    （无经验方差；默认配置 200/200 切分要求 |Δmean| ≥ 0.209），而非 "TabPFN 自适应消化信号"。
+>    换 river 标准 ADWIN 重放同一批已存信号即可触发，见 [detector_replay.md](detector_replay.md)。
+> 4. **真实数据的 5 个 seed 不是独立重复**（此前无 torch.manual_seed，见 src/utils/seeding.py）。
+
+
 **完成日期**：2026-04-29
 **总实验体量**：5 轮 Phase 4 A × 15 runs = 75 个 phase4a runs（不含 Phase 1/3 baseline 30 runs）
 **总 CPU 时间**：约 28 小时
@@ -43,7 +56,7 @@ fit_threshold 0.05 → 0.5（10×）+ warm-start 自 active 复制权重。守�
 - init_strategy random→warm 单效应 = **−0.083 pp** (30% 贡献)
 - 单变量效应之和 = −0.275 pp ≡ 实际 indicator → warmstart 总差 −0.275 pp
 
-**完美加性，无显著交互**。fit_threshold 是 combined_drift 退化的主因，warm-start 是次因。两个设计变量可独立分析。
+~~完美加性，无显著交互~~ → **缺第 4 格，交互未检验**（见文首更正 1）。fit_threshold 是 combined_drift 退化的主因，warm-start 是次因。两个设计变量可独立分析。
 
 ## Ch7 — Routing-Action Ablation（重写：2×2 干净析因）
 
@@ -107,7 +120,7 @@ routing actions 总览：
 
   Sum of single-variable effects:          -0.192 + -0.083 = -0.275 pp
   Actual 2-variable diff (warmstart - indicator):           = -0.275 pp
-  ⟹ 完美加性，无显著交互项
+  ⟹ 恒等式，非交互检验（2×2 缺一格，见文首更正 1）
 ```
 
 → 论文 take-away："Combined_drift 退化的根因是 fit_threshold 调宽（70% 贡献）+ warm-start 副作用（30% 贡献），两者线性叠加，无显著交互。fit_threshold 是主要设计杠杆。"

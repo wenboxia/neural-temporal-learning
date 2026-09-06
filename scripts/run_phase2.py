@@ -31,6 +31,7 @@ from src.data.temporal_loader import TemporalWindowLoader
 from src.models.slow_prior import SlowPrior
 from src.models.fast_corrector import FastCorrector
 from src.utils.metrics import summarize_results, window_accuracy
+from src.utils.seeding import set_global_seed
 
 
 def parse_args():
@@ -123,6 +124,7 @@ def run_single(
 
 def main():
     args = parse_args()
+    set_global_seed(args.seed)   # Phase 5.5: 绑定 torch/numpy 全局 RNG
     os.makedirs(args.results_dir, exist_ok=True)
 
     if args.dataset == "rotating_boundary" and args.n_features == 10:

@@ -60,25 +60,42 @@ _INSECTS_SHA256 = {
 _INSECTS_CACHE_DIR = os.path.expanduser("~/.cache/insects_drift")
 _INSECTS_CSV_FEATURE_COLS = [f"f{i}" for i in range(1, 34)]
 
-# Phase 5 决策：sex-pair 二值化。class IDs [2,3,4,5,11,12] 推断为 3 物种 × 2 性别配对
-# ({2,3} / {4,5} / {11,12} 是相邻整数对)。每对的"偶数 ID" → 0，"奇数 ID" → 1。
-# 限制：exact species mapping not retrievable in experimental window；论文 Limitations 须写明。
+# Phase 5 决策：按相邻 ID 配对的奇偶二值化。class IDs [2,3,4,5,11,12] 被**推断**为
+# 3 物种 × 2 性别（{2,3} / {4,5} / {11,12} 是相邻整数对），每对偶数 ID → 0、奇数 ID → 1。
+# ⚠️ Phase 5.5 更正：Souza 2020 与 USP 仓库均**未提供** class ID → 物种/性别的对应表
+# （原文只说 6 类来自 Aedes aegypti / Aedes albopictus / Culex quinquefasciatus 的雌雄）。
+# 因此这只能称 "ID 分组 (pair parity)"，不能称 sex 分类；论文 Limitations 须写明。
 _INSECTS_BINARIZE_MAP = {2: 0, 4: 0, 11: 0, 3: 1, 5: 1, 12: 1}
 
-# Souza 2020 文档提到 abrupt_balanced 含 5 个 abrupt drift；2026-04-29 50-chunk 诊断
-# 给的 5 个候选位置（精修版 ≈ 12,672 / 14,256 / 17,952 / 46,728 / 52,008）。
-_INSECTS_DRIFT_POINTS_HINT = [12_672, 14_256, 17_952, 46_728, 52_008]
+# ── 漂移坐标：官方 vs 经验推断（Phase 5.5 更正，2026-09-06）────────────────────
+#
+# 官方坐标（Souza et al. 2020, Table 2, "Abrupt (bal.)", 52,848 instances）。
+# 漂移由捕虫器内温度变化引起（30°C → 20°C → ~35°C → ...），即 P(X|y) 变化。
+_INSECTS_OFFICIAL_DRIFT_POINTS = [14_352, 19_500, 33_240, 38_682, 39_510]
 
-# Phase 5 Stage B re-aligned (B1+, 2026-05-01)：
-# 原 A+ 协议 (start/middle/end) 上 detector 0/15 触发，post-hoc 诊断发现 14/15 segment
-# 不含任何 documented drift，且 binarization 进一步稀释信号。重新设计 4 个 drift-aligned
-# 非重叠 5000-sample segments 覆盖全 5/5 drift，每个 drift 距 segment 边界 ≥ 200 samples
-# (ADWIN min_subwindow 缓冲)。归档旧数据于 results/archive_misaligned_stage_b/。
+# 经验推断坐标（2026-04-29 的 50-chunk P(y) 诊断产物）。
+# ⚠️ Phase 5 文档一度把这组升格成 "documented drift"，这是错的：它们是**标签构成**
+# 突变点，不是温度漂移点。实测（2026-09-06）：
+#   - 这些点处的类条件特征偏移 |Δμ|/σ 仅 0.05–0.09（≈全流中位数 0.07），
+#     而官方点处是 0.25–0.49；
+#   - 12,672 与 14,256 都落在同一段连续 class 5（[12,598, 14,352) 共 1,754 条）内部，
+#     不是那段单类区间的真实边界。
+# 保留此常量仅为复现既有 B1+ 结果；新实验一律用官方坐标。
+_INSECTS_EMPIRICAL_PY_SHIFT_POINTS = [12_672, 14_256, 17_952, 46_728, 52_008]
+
+# 向后兼容别名（既有代码路径引用）；语义 = 经验 P(y) 变化点，非官方漂移点。
+_INSECTS_DRIFT_POINTS_HINT = _INSECTS_EMPIRICAL_PY_SHIFT_POINTS
+
+# Phase 5 Stage B re-aligned (B1+, 2026-05-01)：按**经验 P(y) 变化点**对齐的 4 段。
+# ⚠️ Phase 5.5 更正：按官方坐标看，这 4 段只覆盖 2/5 个真实漂移
+#   （early 含 14,352 → local 4,352；mid 含 19,500 → local 3,500；
+#    late_pre / late_post 不含任何官方漂移）。
+# 保留此切法仅为复现既有 60 runs；新实验用官方坐标居中的段（见 todo.md P1）。
 _INSECTS_ALIGNED_BOUNDS = {
-    "early":     (10_000, 15_000),  # 覆盖 drift @ 12,672 + 14,256（local 2,672 / 4,256）
-    "mid":       (16_000, 21_000),  # 覆盖 drift @ 17,952           （local 1,952）
-    "late_pre":  (42_500, 47_500),  # 覆盖 drift @ 46,728           （local 4,228）
-    "late_post": (47_848, 52_848),  # 覆盖 drift @ 52,008           （local 4,160）
+    "early":     (10_000, 15_000),  # 经验点 12,672 + 14,256；官方点 14,352（local 4,352）
+    "mid":       (16_000, 21_000),  # 经验点 17,952；官方点 19,500（local 3,500）
+    "late_pre":  (42_500, 47_500),  # 经验点 46,728；无官方漂移
+    "late_post": (47_848, 52_848),  # 经验点 52,008；无官方漂移
 }
 _INSECTS_ALIGNED_SEGMENTS = list(_INSECTS_ALIGNED_BOUNDS.keys())
 

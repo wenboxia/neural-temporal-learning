@@ -32,6 +32,7 @@ from src.data.synthetic import make_dataset
 from src.data.temporal_loader import CompositeWindowLoader, TemporalWindowLoader
 from src.models.slow_prior import SlowPrior
 from src.utils.metrics import summarize_results, window_accuracy
+from src.utils.seeding import set_global_seed
 
 
 def parse_args():
@@ -298,6 +299,7 @@ def run_tabpfn_baseline(args):
 
 if __name__ == "__main__":
     args = parse_args()
+    set_global_seed(args.seed)   # Phase 5.5: 绑定 torch/numpy 全局 RNG
 
     # rotating_boundary 默认用 2D 特征（方便可视化决策边界旋转）
     if args.dataset_source == "synthetic" and args.dataset == "rotating_boundary" and args.n_features == 10:

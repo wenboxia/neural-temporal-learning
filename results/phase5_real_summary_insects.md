@@ -1,5 +1,25 @@
 # Phase 5 Stage B (re-aligned, B1+) — Insects Real-World Summary
 
+> ⚠️ **Phase 5.5 更正（2026-09-06）** —— 本文件的部分**分析结论**已被更正，原始实验数据不变。
+> 1. **Insects 漂移坐标**：本文件中的 12,672 / 14,256 / 17,952 / 46,728 / 52,008 是
+>    50-chunk **P(y) 构成变化点**（经验推断），不是官方漂移点。
+>    Souza 2020 Table 2 给 "Abrupt (bal.)" 的官方坐标是 **14,352 / 19,500 / 33,240 / 38,682 / 39,510**（温度变化 → P(X|y) 漂移）。
+>    按官方坐标，B1+ 四段只覆盖 **2/5** 个真实漂移（early 含 14,352，mid 含 19,500）。
+> 2. **γ 诊断 "|Δ| ≤ 0.019、比合成小 10×" 复现不出**：用同一批 npz 重算，
+>    在官方点 19,500（mid 段 local 3,500）处 5/5 seed 的 indicator 位移是 **0.095–0.105**。
+>    "10× 稀释" 的说法作废。
+> 3. **detector 沉默的主因是实现层阈值**，不是 "TabPFN 自适应吃掉信号"：
+>    自写 ADWIN 用值域 Hoeffding 界（无经验方差），默认配置下 200/200 切分要求
+>    |Δmean| ≥ **0.209**。换 river 标准 ADWIN 离线重放同一批已存信号：
+>    Insects **16/20** runs 报警、官方漂移 recall **1.00**、中位延迟 266 步；
+>    Electricity 仍 1/15（渐进漂移，应沉默）。见 [detector_replay.md](detector_replay.md)。
+> 4. **"indicator 12/15 触发" 是事件数与运行数混用**：实为 **9/15 运行**报警、共 **12 次**事件
+>    （regime 5/5 运行 7 事件、combined 4/5 运行 5 事件、rotating 0/5）。
+> 5. **真实数据的 5 个 seed 不是独立重复**：全仓库此前无 `torch.manual_seed`，
+>    `--seed` 只喂合成数据生成器；真实数据上它们是同一段数据的 5 次不受控随机重复
+>    （仅 gate/adapter 初始化不同）。既有 p 值只能在此意义下解释。Phase 1 不受影响（std 已为 0）。
+
+
 **完成日期**：2026-05-29
 **协议**：B1+ drift-aligned 4 segments × 5 seeds × 3 phases = **60 runs**，全部 `[ok]`
 **数据集**：USP DS Insects abrupt_balanced (52,848 samples / 33 features) via Google Drive

@@ -32,6 +32,7 @@ from src.data.synthetic import make_dataset
 from src.data.temporal_loader import TemporalWindowLoader
 from src.models.multi_timescale import MultiTimescaleModel
 from src.utils.metrics import summarize_results, window_accuracy
+from src.utils.seeding import set_global_seed
 
 
 def parse_args():
@@ -118,6 +119,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    set_global_seed(args.seed)   # Phase 5.5: 绑定 torch/numpy 全局 RNG
     os.makedirs(args.results_dir, exist_ok=True)
 
     # rotating_boundary 必须用 n_features=2（与 run_phase2 保持一致）
