@@ -192,3 +192,126 @@ class CompositeWindowLoader:
                 y_query=self.y[t: t + 1],
                 t=t,
             )
+
+
+class DualMemoryLoader:
+    """长短双记忆 context（Phase 5.5 Step 7）。
+
+    参照 KDD 2026 (Lourenço & Gama, *In-context Learning of Evolving Data Streams
+    with Tabular Foundational Models*) 的双记忆方案，作为 Phase 1 纯滑窗之外的
+    **文献基线** —— 否则答辩时"你赢的是弱基线"这个质疑站得住。
+
+    机制：
+      - **短期库**：容量 `int(budget * short_ratio)` 的 FIFO，装最近样本；
+      - **长期库**：短期库溢出的样本流入长期库；长期库满时，淘汰**当前数量最多的
+        那一类里最老的**一条（类均衡保留）。
+      - context = 长期库 + 短期库（TabPFN 对 context 顺序不敏感）。
+
+    ⚠️ 两个已知陷阱，都在这里处理掉了：
+
+    1. **朴素实现会退化成纯滑窗**。长期库一旦填满，就变成"每步进一条、出一条"，
+       在类别均衡的流上进出速率相同，长短两库的并集 ≈ 最近 budget 条，
+       与 `TemporalWindowLoader` 的 context 是同一个集合。
+       所以本实现的淘汰规则是**按类**挑最老的，只有当某类在长期库里过量时才淘汰它，
+       在类别不均衡的时段（Insects 的单类长段）才真正与滑窗不同。
+    2. **陈旧样本会被永久钉住**。少数类的样本永远不是"最多的那一类"，
+       于是可以无限期留在长期库里，把过时的 P(y|x) 一直喂给 TabPFN。
+       `max_age` 给长期库的样本设年龄上限，超龄一律淘汰。
+
+    Prequential 安全：先 yield 再 push（yield-then-push），
+    所以 (X[t], y[t]) 绝不会出现在预测它自己时的 context 里。
+    """
+
+    def __init__(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        context_size: int = 300,
+        short_ratio: float = 0.5,
+        max_age: Optional[int] = None,
+        step_size: int = 1,
+        warmup: Optional[int] = None,
+    ):
+        """
+        Args:
+            X, y:          数据
+            context_size:  长短两库容量之和（与纯滑窗的 context_size 对齐，保证公平）
+            short_ratio:   短期库占比 ∈ (0, 1)
+            max_age:       长期库样本的最大年龄（步）；None = 不限（不推荐，见类注释陷阱 2）
+            step_size:     步长
+            warmup:        前多少步只用滑窗热身（默认 = context_size）
+        """
+        assert len(X) == len(y)
+        assert 0.0 < short_ratio < 1.0, f"short_ratio 必须 ∈ (0,1)，收到 {short_ratio}"
+        assert context_size >= 2, context_size
+        assert max_age is None or max_age > 0, max_age
+
+        self.X = X
+        self.y = y
+        self.context_size = context_size
+        self.short_ratio = short_ratio
+        self.max_age = max_age
+        self.step_size = step_size
+
+        self.short_capacity = max(1, int(round(context_size * short_ratio)))
+        self.long_capacity = context_size - self.short_capacity
+        assert self.long_capacity >= 1, (
+            f"long_capacity={self.long_capacity} < 1；short_ratio 太大"
+        )
+
+        self.start = warmup if warmup is not None else context_size
+        self.end = len(X)
+
+    def __len__(self) -> int:
+        return max(0, (self.end - self.start + self.step_size - 1) // self.step_size)
+
+    # ------------------------------------------------------------------
+
+    def _evict_from_long(self, long_idx: "list[int]", t: int) -> None:
+        """长期库满时淘汰一条：先清超龄，再淘汰"最多类里最老的那条"。"""
+        if self.max_age is not None:
+            fresh = [i for i in long_idx if t - i <= self.max_age]
+            if len(fresh) < len(long_idx):
+                long_idx[:] = fresh
+                if len(long_idx) < self.long_capacity:
+                    return
+        counts: dict = {}
+        for i in long_idx:
+            counts[int(self.y[i])] = counts.get(int(self.y[i]), 0) + 1
+        majority = max(counts, key=lambda c: (counts[c], -c))
+        for pos, i in enumerate(long_idx):          # long_idx 按时间升序
+            if int(self.y[i]) == majority:
+                long_idx.pop(pos)
+                return
+        long_idx.pop(0)
+
+    def __iter__(self) -> Generator[TemporalBatch, None, None]:
+        long_idx: list = []
+        short_idx: list = []
+
+        # 热身：用 [0, start) 填充两库（短期库拿最近的，其余进长期库）
+        for i in range(self.start):
+            short_idx.append(i)
+            if len(short_idx) > self.short_capacity:
+                overflow = short_idx.pop(0)
+                long_idx.append(overflow)
+                if len(long_idx) > self.long_capacity:
+                    self._evict_from_long(long_idx, self.start)
+
+        for t in range(self.start, self.end, self.step_size):
+            ctx = long_idx + short_idx                     # 长在前、短在后
+            idx = np.asarray(ctx, dtype=np.int64)
+            yield TemporalBatch(
+                X_ctx=self.X[idx],
+                y_ctx=self.y[idx],
+                X_query=self.X[t: t + 1],
+                y_query=self.y[t: t + 1],
+                t=t,
+            )
+            # yield-then-push：标签观测之后才入库，绝不泄漏当前样本
+            short_idx.append(t)
+            if len(short_idx) > self.short_capacity:
+                overflow = short_idx.pop(0)
+                long_idx.append(overflow)
+                if len(long_idx) > self.long_capacity:
+                    self._evict_from_long(long_idx, t)

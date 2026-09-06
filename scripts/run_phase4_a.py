@@ -30,7 +30,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.data.real_world import load_real_world
 from src.data.synthetic import make_dataset
-from src.data.temporal_loader import TemporalWindowLoader
+from src.data.temporal_loader import (
+    CompositeWindowLoader,
+    DualMemoryLoader,
+    TemporalWindowLoader,
+)
 from src.models.multi_timescale import (
     ACTIONS_ON_ALARM,
     TRIGGER_SOURCES,
@@ -152,6 +156,19 @@ def parse_args():
                         help="把巩固推迟到 alarm_t + consolidation_window，"
                              "确保训练样本全部来自报警之后")
 
+    # ── Phase 5.5：context 管理策略（路径 B + KDD 2026 双记忆基线）────────
+    parser.add_argument("--context_loader", type=str, default="sliding",
+                        choices=["sliding", "composite", "dual"],
+                        help="sliding（默认，纯滑窗）/ composite（固定池+滑窗，需 --fixed_ratio）"
+                             " / dual（KDD 2026 长短双记忆基线）")
+    parser.add_argument("--fixed_ratio", type=float, default=0.0,
+                        help="composite 模式下固定池占 context 的比例 ∈ [0,1)")
+    parser.add_argument("--short_ratio", type=float, default=0.5,
+                        help="dual 模式下短期库占 context 的比例 ∈ (0,1)")
+    parser.add_argument("--long_max_age", type=int, default=2000,
+                        help="dual 模式下长期库样本的年龄上限（步）；"
+                             "不设会把过时的 P(y|x) 永久钉在 context 里")
+
     return parser.parse_args()
 
 
@@ -204,11 +221,41 @@ def main():
     print(f"漂移点 ({len(dataset.drift_points)} 个): {dataset.drift_points}")
 
 
-    loader = TemporalWindowLoader(
-        dataset.X, dataset.y,
-        context_size=args.context_size,
-        step_size=1,
-    )
+    # ── context 管理策略 ─────────────────────────────────────────────────
+    # 两个开关重叠时以 --context_loader 为准，并显式报错而不是静默二选一。
+    if args.fixed_ratio > 0 and args.context_loader != "composite":
+        raise SystemExit(
+            f"[error] --fixed_ratio={args.fixed_ratio} 需要 --context_loader composite，"
+            f"当前是 {args.context_loader!r}。两个开关重叠时不做静默猜测。"
+        )
+    if args.context_loader == "composite":
+        if not (0.0 < args.fixed_ratio < 1.0):
+            raise SystemExit("[error] --context_loader composite 需要 0 < --fixed_ratio < 1")
+        loader = CompositeWindowLoader(
+            dataset.X, dataset.y,
+            context_size=args.context_size,
+            fixed_ratio=args.fixed_ratio,
+            step_size=1,
+            random_seed=args.seed,
+        )
+        n_fixed = int(args.context_size * args.fixed_ratio)
+        print(f"  组合窗口: 固定池 {n_fixed} + 滑动窗 {args.context_size - n_fixed}")
+    elif args.context_loader == "dual":
+        loader = DualMemoryLoader(
+            dataset.X, dataset.y,
+            context_size=args.context_size,
+            short_ratio=args.short_ratio,
+            max_age=args.long_max_age,
+            step_size=1,
+        )
+        print(f"  双记忆: 短期库 {loader.short_capacity} + 长期库 {loader.long_capacity}"
+              f" (max_age={args.long_max_age})")
+    else:
+        loader = TemporalWindowLoader(
+            dataset.X, dataset.y,
+            context_size=args.context_size,
+            step_size=1,
+        )
     total_steps = len(loader)
     if args.max_eval_steps is not None:
         total_steps = min(total_steps, args.max_eval_steps)
@@ -438,6 +485,10 @@ def main():
             variant.append(f"{args.trigger_source}lag{args.oracle_lag}")
         if args.detector_impl != "own":
             variant.append(args.detector_impl)
+        if args.context_loader != "sliding":
+            variant.append(
+                f"fr{args.fixed_ratio}" if args.context_loader == "composite" else "dual"
+            )
         if variant:
             stem += "_" + "_".join(variant)
     png_path = os.path.join(args.results_dir, f"{stem}.png")
@@ -487,6 +538,10 @@ def main():
         action_t=np.array([a[0] for a in model.action_events], dtype=np.int64),
         n_context_truncations=np.array([model.n_context_truncations]),
         consolidate_on_post_alarm_data=np.array([int(args.consolidate_on_post_alarm_data)]),
+        context_loader=np.array([args.context_loader]),
+        fixed_ratio=np.array([args.fixed_ratio]),
+        short_ratio=np.array([args.short_ratio]),
+        long_max_age=np.array([args.long_max_age]),
     )
     print(f"数值结果已保存至: {npz_path}")
 
