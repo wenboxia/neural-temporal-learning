@@ -1,231 +1,191 @@
-# TODO — 待办清单
+# TODO — Phase 5.5 重启计划（活文档）
 
 > 入口文档见 [`start_prompt.md`](start_prompt.md)（**先读那个**）。
-> 本文件是可执行的待办清单，含实验技术规格。
+> **本文件是 Phase 5.5 的唯一活计划**：每完成一步、每次改计划，都直接改这里，
+> 并在文末「进度日志」记一行。`phase4_plan.md` / `phase5_plan.md` 是已完成阶段的历史记录，不再更新。
 >
-> **最后更新**：2026-09-05
-> **当前目标**：完成 KTH 硕士毕业论文答辩（pass 即可，时间不紧张）
+> **计划创建**：2026-09-06 ｜ **最后更新**：2026-09-06
+> **当前目标**：完成 KTH 硕士论文答辩（pass 即可，时间不紧张）
 
 ---
 
-## 状态速览
+## 0. Context
 
-| 优先级 | 分类 | 状态 |
-|---|---|---|
-| P0 | 认知对齐 | 待做 |
-| P1 | 导师指定核心实验（Phase 5.5） | 待做 ← **主线** |
-| P2 | 论文写作 | 阻塞于 P1 |
-| P3 | 仓库卫生 | 部分待做 |
-| — | 明确不做的事 | 见文末 |
+冻结 TabPFN 之上的多时间尺度概念漂移适应。导师 2026-06-01 的诊断：
+检测器在真实数据上不触发 ⇒ 三层结构从未被激活 ⇒ "方法无效" 这个结论从未被真正验证过。
+要求重设计检测信号，争取正面结果；负面结果保留但降级，不作卖点。
 
-> **用户希望接手的 AI 自己判断优先级**。下面的 P1 三项（路径 A / 路径 B / 维度 C）导师说是"平行"的，
-> 但成本与产出概率不同，建议读完后向用户提建议再动手。
+**2026-09-06 重启，三方（Claude / Astra / Opus）交叉核实后确认的事实**：
 
----
-
-## P0 — 认知对齐（先做，~30 min）
-
-- [ ] 读 [`start_prompt.md`](start_prompt.md) 全文，重点 §5「方向说明」
-- [ ] 读 `6_1和导师汇报的录音_包含两份转写.txt` 前半部分（GPT-6 Astra 版），重点 00:02–13:00 技术讨论段
-      - 讯飞听见那份（文件后半）专业名词转写不准，仅作交叉参考
-- [ ] 确认理解这个转变：**从"把负面结果包装成发现"→"重新设计 detector 争取正面结果"**
-
-**为什么重要**：项目文档里 Phase 5 的结论曾被定位为论文核心 contribution，这个定位已被导师否定。
-不先对齐会沿着错误方向继续做。
-
----
-
-## P1 — 导师指定核心实验（Phase 5.5）← 主线
-
-**背景**：真实数据上 detector 触发率 Electricity 1/15、Insects 0/20 → 三层结构根本没被激活
-→ "方法无效"这个结论其实**从未被真正验证过**。导师认为方法本身可能可行，是 detector 拦住了。
-
-导师原话：
-> "如果你现在检测器都不触发的话，你的三层的结构其实就完全体现不了作用，你现在这个方法其实就无法去验证。"
-> "所以我们就要把这个场景去设计到，就是说能够更容易的让它触发，然后看看我这算法的效果。"
-
-**共同前提**：新实验**直接在真实数据上跑，不必先过合成**（导师："合成数据有点太理想了，只适合做可行性分析"）。
+1. **Insects 官方变点**（Souza 2020 Table 2, "Abrupt (bal.)", 52,848 instances）：
+   **14,352 / 19,500 / 33,240 / 38,682 / 39,510**（温度变化 30°C → 20°C → ~35°C → …，即 P(X\|y) 漂移）。
+   仓库原用的 12,672 / 14,256 / 17,952 / 46,728 / 52,008 是 50-chunk **P(y) 构成变化点**。
+   实测类条件特征偏移：经验点 0.05–0.09（全流中位数 0.07）vs 官方点 0.25–0.49；
+   且 12,672 与 14,256 都在同一段连续 class 5（[12,598, 14,352) 共 1,754 条）内部。
+   **B1+ 四段按官方坐标只覆盖 2/5 个真实漂移**（early 含 14,352，mid 含 19,500）。
+2. **检测器沉默的主因是实现层阈值**（✅ 已验证并修复，见 Step 1）。自写 ADWIN 用值域 Hoeffding 界、
+   无经验方差，默认配置 200/200 切分要求 \|Δmean\| ≥ **0.209**，而真实 indicator 位移 ≈ 0.10。
+3. **每个温度段末尾是一长串 class 5**（1754 / 74 / 97 / 537 / 822 条）；14,352 与 38,682 前 200 条 100% class 5。
+   ⇒ TabPFN 探针的掉幅混有"类别消失-重现"效应，**不能用掉幅大小选任务**。
+4. **class ID → 物种/性别无官方映射**（Souza 2020 与 USP 仓库均未提供）。
+   任何二值化只能称 **ID 分组**，不能称 sex / species 分类。论文 Limitations 必写。
+5. **文档已订正**（Step 2 完成）：γ 数字、9/15 计数、2×2 缺格、seed 未绑定 torch。
+6. **检测延迟 145–447 步 ≈ TabPFN 滑窗自恢复时间（约 100–200 步）**
+   ⇒ "报警后再校正" 的抢救窗口可能很小 ⇒ **必须先做判别性对照**（Step 5），
+   不能直接上规模。检测器的评价指标是**延迟**，不只是"触不触发"。
+7. **算力**：MacBook M2 Pro 只能 CPU（MPS 慢 5.6×，1.2 s/步）；ROG 幻 14（NVIDIA）2026-09-13 左右可用，
+   预计 4–6×。**所有需互相比较的运行都在同一台机器上跑**（GPU/CPU 浮点结果有细微差别）。
+8. **6 类改造成本**（7-agent 只读勘察 + 2 个 adversarial reviewer）：33 处 / 19 文件，含数学改动
+   （概率向量重归一化、MSE 均值缩减致梯度缩 ~1/K、阈值 / lr / 检测器全部重标定、测试重写、
+   与既有二值数字不可比），**45–60 工时 + ROG 重跑 12–15 h**。
 
 ---
 
-### P1-A — 路径 A：对比信号 detector ⭐ 最贴合导师核心诊断
+## 1. 已定决策
 
-**思路**（导师原话）：
-> "你可以比较它的适应前后的差距，适应前后的差距作为 detect 的信号。因为你现在如果用它适应以后的误差的话，那个信号就很弱了。"
-> "一个是滑窗 0 就不适应，一个是滑窗 300，两种对比，那个差作为信号去作为检测器的信号。这个刻画的就是它的 drift。"
-> "基于检测信号可以判定它 drift 的强弱，如果你的差值很大说明 drift 比较明显，对吧？很直观。"
-
-即：**不再把"适应之后的误差"喂给 ADWIN，而是把"适应 vs 不适应两路预测的差值"喂给 ADWIN。**
-
-#### A0 — 便宜的信号质量诊断（**先做这个，不要跳过**）
-
-**为什么**：路径 A 会让 TabPFN 调用翻倍（单次真实数据 run 从 ~1.5–2.25h 涨到 ~3–4.5h）。
-上规模前先花 2–3h 确认信号真的更强。这套做法在 Phase 4 Day 0.5 的 Oracle 诊断上验证过是有效的。
-
-**怎么做**：
-1. 选 Insects `late_post` 段（含 drift @ local t=4160）+ `early` 段（含 drift @ 2672 / 4256），seed=42
-2. 每个 prequential 步跑**两次** `SlowPrior.predict()`：
-   - **stale 路**：context 固定为该段最早的 200 个样本（永不更新）→ 代表"不做 in-context 适应"
-   - **sliding 路**：当前滑动 context（现有行为）→ 代表"做 in-context 适应"
-3. 记录三条序列：两路的 `predict_proba` 差值 `|p_stale - p_sliding|`、两路硬预测是否不一致 `int(pred_stale != pred_sliding)`、以及现有的 indicator 流
-4. 对每个 documented drift 点，算前后 ±200 步的均值差 `|Δ|`，与现有 indicator 的基线对比
-
-**判据（关键）**：现有 indicator 流在真实 Insects 上 `|Δ| ≤ 0.019`，比合成的 0.20 小 10×，这就是 ADWIN 沉默的原因
-（见 [`results/phase5_confound2_diagnostic.md`](results/phase5_confound2_diagnostic.md)）。
-**对比信号的 `|Δ|` 要显著大于 0.019 才值得上规模**；理想是接近或超过 0.1。
-
-**成本**：~2–3h。不需要改模型代码，可以写成独立诊断脚本（例如 `scripts/diag_contrast_signal.py`）。
-**产出**：诊断图 + 一段结论。若 `|Δ|` 没有明显提升，**立刻停下来汇报**，不要硬上规模。
-
-#### A1 — 实现（A0 通过后再做）
-
-- [ ] `src/models/multi_timescale.py` 加 `detector_input` 参数：`{"indicator"（默认，向后兼容）, "contrast"}`
-      - 当前 detector 输入硬编码在 [multi_timescale.py:304-306](src/models/multi_timescale.py#L304-L306)
-- [ ] `contrast` 模式下 `step()` 需要拿到 stale context —— 建议由调用方（脚本层）传入，避免模型层持有数据
-- [ ] `scripts/run_phase4_a.py` 加 `--detector_input` flag（默认 `indicator`）
-- [ ] 补单元测试到 `tests/test_multi_timescale_phase4a.py`
-- [ ] 用 `--max_eval_steps 100` smoke 一遍再上规模
-
-**成本**：半天到一天编码 + 测试。
-
-#### A2 — 真实数据验证
-
-- [ ] 先跑**小规模**：Insects 2 个含 drift 的段 × 2 seeds × {phase1, phase4a}，看 detector 触发率与准确率
-- [ ] 通过后再考虑扩到完整 multiseed
-
-**成本**：小规模 ~8 组 × 3–4.5h ÷ n_parallel=2 ≈ 15–18h。完整 sweep 会到 100h+，**按预算裁剪，不要默认全跑**。
-
----
-
-### P1-B — 路径 B：fixed_ratio（提高固定池比例）
-
-**思路**（导师原话）：
-> "你固定更多，它的 error 本来就更大了……两种路径都是为了提升它的检测器的信号强度，然后去验证你的校正器。"
-
-即：让模型少适应一点，误差信号就不会被 in-context learning 吃掉，detector 就能看到东西。
-
-**现状**：`CompositeWindowLoader`（[src/data/temporal_loader.py:109](src/data/temporal_loader.py#L109)）已经实现且支持 `fixed_ratio`，
-但**只接进了 `run_baselines.py`**；`run_phase3.py` / `run_phase4_a.py` 仍然只用 `TemporalWindowLoader`。
-
-- [ ] 把 `--fixed_ratio` + `CompositeWindowLoader` plumb 进 `run_phase4_a.py`
-      （照搬 `run_baselines.py` 里现成的分支写法即可，约 10 行）
-- [ ] 在真实数据上扫几档 `fixed_ratio ∈ {0.0, 0.33, 0.67}`，1–2 个含 drift 的段 × 1–2 seeds
-- [ ] 记录每档的：detector 触发次数、overall acc、drift 后恢复速度
-
-**关键权衡**：Phase 2.5 已知 `fixed_ratio` 提高会让适应速度变快但**总体准确率下降**（fr=0.67 时掉 2.5pp，fr=0.93 时掉 11pp）。
-所以这条路径要找的是**触发率提升足以补偿准确率损失**的甜点，不是无脑调高。
-
-**成本**：plumb 半小时；实验 ~6 组 × 1.5–2.25h ÷ 2 ≈ 5–7h。
-**这条比路径 A 便宜得多，可以先做**（不需要双倍 TabPFN 调用）。
-
----
-
-### P1-C — 维度 C：遗忘 / 适应 trade-off ⭐ 导师点名最可能出正面结果
-
-**思路**（导师原话）：
-> "拿之前那批数据也作为一个指标，看一下之前上面的效果，做一个适应跟遗忘之间的平衡，这个可以作为一个点。"
-> "遗忘程度跟你的适应能力一定是 trade-off 的关系，不可能既要都要。这个就是看你的方法能不能取得一个平衡。"
-> "你的适应能力差不多的情况下，你的前面的遗忘能不能减少。如果这个是可以的话，那它也可以作为你一个正面结果的一个点。"
-
-即：引入**第二个评估维度**。现在只看"适应新 regime 有多快/多准"，再加上"适应之后还记不记得旧 regime"。
-如果我们的多时间尺度系统在**适应能力持平**的前提下**遗忘更少**，这就是一个可以写进论文的正面结果。
-
-**为什么这条有吸引力**：
-- 不依赖 detector 是否触发 → 不被 P1-A/B 阻塞，可以并行
-- 概念上直接对应系统设计动机（slow 层保长期、fast 层保近期），叙事自洽
-- 是 continual learning 领域的标准评估维度（stability-plasticity trade-off / backward transfer），有现成文献可引
-
-**现状**：**代码里完全不存在**遗忘/回测相关实现，需要新写。
-
-- [ ] 新建回测评估 harness（建议 `src/utils/forgetting.py` 或扩展 `src/utils/metrics.py`）
-      - 在流的若干检查点，用当前模型回测**更早 regime 的留出样本**，记录准确率
-      - 注意：回测必须用留出样本，不能用已经进过 context/buffer 的样本，否则不是真的在测遗忘
-      - 注意：回测**不能污染** prequential 主循环的状态（buffer / gate 参数都不能因回测而更新）
-- [ ] 在 Insects（突发漂移，regime 边界清楚）上对比 phase1 / phase3 / phase4a 的遗忘曲线
-- [ ] 产出 adaptation-vs-forgetting 二维图（横轴适应能力、纵轴遗忘程度，每个方法一个点/一条曲线）
-
-**成本**：编码 1 天（含测试）；实验可复用已有 run 或小规模新跑 ~10h。
-
----
-
-### P1 优先级建议（供和用户讨论）
-
-导师说三项"平行"，但从成本/产出看：
-
-| 项 | 成本 | 出正面结果的概率 | 依赖 |
-|---|---|---|---|
-| **P1-B** fixed_ratio | 最低（~6h，代码几乎现成） | 中（有准确率损失的权衡） | 无 |
-| **P1-C** 遗忘 trade-off | 中（1 天编码 + ~10h 实验） | **较高**（导师点名，且不依赖 detector 触发） | 无 |
-| **P1-A** 对比信号 | 最高（编码 1 天 + 实验成本翻倍） | 中高（最贴合导师核心诊断） | A0 诊断先过 |
-
-一个可能的顺序：**P1-B（最便宜，快速看到 detector 能不能被推动）→ P1-A0（便宜诊断）→ P1-C（并行开工）→ P1-A1/A2**。
-但这只是建议，**请和用户确认后再动手**。
-
----
-
-## P2 — 论文写作（KTH 硕士毕业论文）
-
-**阻塞于 P1** —— 论文主线取决于 Phase 5.5 能不能拿到正面结果。
-
-- [ ] P1 有结论后，和用户+导师一起定论文骨架
-- [ ] 起草（中文正文 + 英文摘要）
-- [ ] 答辩 PPT 草稿 → 导师说要先看一版再正式答辩
-
-**已知的写作约束**：
-- 目标是 **pass**，不是期刊 novelty。不需要预演 reviewer 攻击、不做投稿版
-- 标题去 PFC，用 Multi-Timescale / Hierarchical 等 ML 术语
-- Ch2.3 保留半页 PFC 灵感动机，但明确写"因 frozen TabPFN 无 weight-level consolidation，不声称生物建模"
-- Phase 2 / 2.5 进附录（保留实验诚实性）
-- Phase 3 / 4 / 5 的负面结果**保留**，定位为方法演进的中间步骤，不作核心卖点
-- Limitations 必写：合成 rotating +1pp 没迁移到真实数据（mechanism-specific，不普适）
-
-> ⚠️ [`phase5_plan.md`](phase5_plan.md) §7 里那份 10 章大纲和标题是 Phase 5 之前的旧版，**已过时，不要直接用**。
-
-**导师要求的流程**（录音 14:52–15:14、16:50–17:14）：
-- 进度随时更新到 GitHub 仓库，有需要讨论的点随时联系
-- **开始写论文时要告诉导师**，导师要一起看
-- 答辩 PPT 先出草稿一起过，正式答辩前再对一次
-
----
-
-## P3 — 仓库卫生
-
-- [x] **把导师录音转写加进 `.gitignore`**（隐私 P0）— 已完成 2026-09-05
-      仓库是公开的（github.com/wenboxia/neural-temporal-learning），转写此前未被忽略也未追踪，
-      一次 `git add -A` 就会泄露。已加 `*录音* / *转写* / *.txt` 规则并验证生效；历史提交中无 .txt 被追踪
-- [x] 提交 pending 的 `.gitignore` 改动（含 `advisor_demo_*.md`）— 已完成 2026-09-05
-- [x] 处理 `results/smoke/` 与 `results/smoke_oracle.png`（Phase 5 smoke 残留）— 已加 gitignore 2026-09-05
-      （本地保留，不进仓库；无论文价值）
-- [x] 修 [`README.md`](README.md) 里 `run_phase4_a.py` 的 flag：`--datasets` → `--dataset`（单数）— 已完成 2026-09-05
-- [ ] [`phase5_plan.md`](phase5_plan.md) §7.1 旧标题/章节列表、§8 ETA 表已过时 → 已加 superseded 标注，
-      后续若确定新论文骨架可整段重写
-
----
-
-## 明确不做的事
-
-| 不做 | 原因 |
+| 决策 | 内容 |
 |---|---|
-| 加第三个真实数据集 | 导师认可现有两个（一渐进一突发）已够，"这几个数据应该已经算比较干净了" |
-| β binarization ablation（6-class native Insects） | 成本 ≥ 1 周（系统重构 + 重跑全部基线），不在主线 |
-| fit_threshold / init_strategy 等细粒度 ablation | 导师："治根不治本……应该是最后补充的一些实验，它不应该是核心实验" |
-| 投稿版论文 / 期刊投稿 | 目标已降级为硕士答辩 pass |
-| 重跑 Phase 1–4 合成实验 | 数据已齐全且已 commit |
-| 新 detector 设计先在合成数据上验证 | 导师：直接在真实数据上验证 |
-| 改整体算法架构 | 导师：先确认方法可不可行，"如果完全不行，我觉得可以再看" —— 排在 P1 之后 |
+| **三条创新点都做** | ① 对比信号检测器（导师路径 A）② 适应-遗忘双评价（导师维度 C，与路径 B 合并成前沿图）③ 诚实消融（四分支 oracle 对照） |
+| **标签方案 = C（先二值后 6 类）** | 本周与第一批 ROG 实验用 pair 二值 `pair_A_vs_B`（{2,3} vs {4,5}）跑通检测-动作链；现有 {2,4,11}/{3,5,12} 更名 `pair_parity`。若检测-动作链有增益，再投 6 类原生作论文主数字 |
+| **Git** | 每完成一项本地 commit 并推 main，显式列文件，绝不带私人转写 |
+| **导师沟通** | 第一批结果出来后统一同步（段切错 + γ 更正 + river 结果一起讲） |
+| **本周边界** | MacBook 只做编码与零成本诊断；长实验一律留给 ROG |
 
 ---
 
-## 附：关键数字速查
+## 2. 本周任务（MacBook）
+
+每项完成后：`pytest tests/` 全绿 → commit → push → 在进度日志记一行。
+
+- [x] **Step 1 — 检测器**：`src/drift/error_detector.py` 加 `RiverADWINDetector` 包装 + `make_detector` 工厂，
+      `--detector_impl {own,river}`（own 保留为消融）；`scripts/diag_detector_replay.py` 对 35 条已存
+      indicator 流做 δ 扫描，出延迟 / 误报表 → [`results/detector_replay.md`](results/detector_replay.md)。
+      **结果见 §5。**
+- [x] **Step 2 — 校准硬伤**：`src/utils/seeding.py` + 接进四个脚本；`real_world.py` 坐标常量改名并注明官方 vs 经验；
+      订正 `progress_report.md` / `results/phase5_*.md` / `results/phase4_final_verdict.md`。
+- [ ] **Step 5 — ActionPolicy + oracle 触发** ← **进行中**（顺序已调整到 Step 3 之前，理由见 Context 6）
+      `src/models/multi_timescale.py` + `scripts/run_phase4_a.py`：
+      动作 `{route_adapter, context_reset, buffer_clear, none}` × 触发源 `{detector, oracle}`。
+      **设计守卫（来自 adversarial 勘察，13 条中的关键项）**：
+      - 报警在**下一步预测前**生效，与 `run_baselines.py --oracle_context_reset` 同一时刻表（避免差一步）
+      - `detector.clear()` 改为可选，默认行为不变（否则既有 npz 不可比）
+      - `use_adapter_library=False`（Phase 3 路径，detector/library 为 None）不能被弄坏
+      - oracle 触发**不清空**影子检测器，否则延迟测不准
+      - `drift_points` 为空（Electricity）或超出 `--max_eval_steps` 时**报错**，不能静默变成"永不适应"
+      - context 截断后有**最小长度 + 类别覆盖**守卫（否则单类 context 触发 SlowPrior fallback → 误报循环）
+      - 输出 stem 带 action / trigger 标签，避免不同分支互相覆盖 npz
+      - 报警后**只用切点之后的样本**训练新 adapter（否则在用旧概念数据训练）
+- [ ] **Step 3 — 标签与切段**：`real_world.py` 加 `label_scheme ∈ {pair_parity, pair_A_vs_B}`，
+      过滤行后把 `drift_points` 重映射到 `kept_ids` 坐标；新增官方变点居中的 2500–3000 段（`aligned_v2`）；
+      `--label_scheme` 穿过三个脚本 + `run_multiseed.py` 的 out_tag / npz_path / build_cmd（约 8 处调用点）。
+- [ ] **Step 4 — A0 对比信号诊断**：在已有 mid 段（含官方点 19,500），滑窗路直接用 npz 已存预测，
+      stale 路一次**批量** TabPFN 调用（已实测逐样本独立、批量快 7.4×，成本≈0）；
+      比较 contrast / indicator / P(y) 三种信号在 river ADWIN 下的**延迟与误报** → `scripts/diag_contrast_signal.py`。
+- [ ] **Step 6 — 遗忘回测** `src/utils/forgetting.py`：段首留出集不进 context / buffer / 训练；
+      回测前后**模型状态哈希不变**的单测。
+- [ ] **Step 7 — 双记忆 loader + fixed_ratio**：`CompositeWindowLoader` 接进 `run_phase4_a.py`
+      （照 `run_baselines.py:122-140`）；`DualMemoryLoader`（短 FIFO + 类均衡长期库，**加年龄上限**，
+      yield-then-push）；`run_multiseed.py` 的 out_tag 带 fr / dual，避免 skip-existing 误跳。
+      ⚠️ 勘察警告：在类别均衡的流上朴素双记忆会退化成纯滑窗，长期库必须有年龄上限才有意义。
+- [ ] **Step 8 — metrics**：共用恢复目标 A\*（同段同 seed 的 Phase 1）+ "固定窗口内少犯错误数"
+      （从变点起算 / 从报警起算）；保留旧字段以便与既有结果对比。
+      ⚠️ 现有 `adaptation_speed` 用各方法**自己**的漂移前均值 ×0.95 作门槛，准确率低的方法反而更容易"恢复"。
+- [ ] **Step 9 — ROG 运行清单 + WSL2 安装脚本**；回头更新 `start_prompt.md`。
+
+---
+
+## 3. 留给 ROG 的实验
+
+每批 ≤ 3 天 CPU 等价，做完停下汇报。
+
+1. **新基线**：新段 × `pair_A_vs_B` 的 Phase 1（1 run，确定性）+ 双记忆基线。
+   **中止判据**：acc 要有 headroom（不能像 pair_parity 那样 96–98%）且 ≥2 段漂移后跌 ≥5pp。不达标就停下汇报。
+2. **判别性对照**（最关键）：oracle 即时触发 vs river 报警 × 四分支动作，
+   固定数据 / context / 初始化，比较触发后**同一批样本**的累计错误。三种可能结论：
+   - oracle 即时触发也无增益 → 问题在动作本身，优化信号救不了
+   - oracle 有效、实际报警无效 → 瓶颈是检测时机，路径 A 才有意义
+   - 实际报警也有效 → 直接扩大规模
+3. 检测器驱动的三层激活 vs Phase 1 vs 双记忆（3 seeds）。
+4. 前沿图：fixed_ratio × 有无校正 × 双记忆，adaptation-vs-forgetting。
+5. 若 2–3 有增益 → 6 类改造 + 重跑；胜出配置补 5 seeds，paired t-test。
+
+---
+
+## 4. 验证方式
+
+- `pytest tests/` 全绿（Step 2 后为 115 passed）+ 每步新增单测。
+- Step 1 的 river 重放数字可复现（mid 段官方点 local 3,500，延迟 145–172 步）。
+- Step 4 出 A0 图与延迟表；**contrast 不优于 indicator 也如实记录**。
+- Step 5–8 只跑 `--max_eval_steps 100` smoke，不在 MacBook 上跑长实验。
+
+---
+
+## 5. 关键数字速查（含 Phase 5.5 更正）
 
 | 指标 | 数值 |
 |---|---|
-| Phase 1 baseline | 79.89 ± 0.99% (regime_switching, n=5) |
-| Phase 3 vs P1 | rotating +1.00 sig / regime NS / combined −0.47 sig 负 |
-| Oracle context-reset | +0.51 pp sig（context 只占损失的 ~1/3） |
-| Phase 4 detector 触发（合成） | raw 0/15、abs 0/15、indicator 12/15、warmstart 12/15、fit05random 9/15 |
+| Phase 1 baseline（合成） | 79.89 ± 0.99% (regime_switching, n=5) |
+| Phase 3 vs P1（合成） | rotating +1.00 sig / regime NS / combined −0.47 sig 负 |
+| Oracle context-reset（合成） | +0.51 pp sig（context 污染只占漂移损失的 ~1/3） |
+| Phase 4 detector 触发（合成，**计数已订正**） | raw 0/15、abs 0/15、indicator **9/15 运行 12 事件**、warmstart 同、fit05random 9/15 |
 | Phase 5 Electricity phase4a vs P1 | −0.064 NS，detector 1/15 |
-| Phase 5 Insects B1+ phase4a vs P1 | −0.172 sig p<0.0001，detector **0/20** |
-| γ 信号稀释 | 真实 indicator \|Δ\| ≤ 0.019 vs 合成 0.20（**10× 稀释**）← 路径 A 要打败的基线 |
-| Insects drift 位置（绝对坐标） | 12,672 / 14,256 / 17,952 / 46,728 / 52,008 |
-| Insects B1+ 四段 | early [10000,15000) / mid [16000,21000) / late_pre [42500,47500) / late_post [47848,52848) |
+| Phase 5 Insects B1+ phase4a vs P1 | −0.172 sig p<0.0001，detector 0/20 |
+| **自写 ADWIN 所需 \|Δmean\|**（默认配置 200/200 切分） | **0.209** ← 真实信号只有 0.10，结构性触发不了 |
+| **river ADWIN 重放（δ=0.002）** | Insects **16/20 runs 报警、官方漂移 recall 1.00、中位延迟 266 步**；Electricity 1/15（渐进，应沉默） |
+| **官方点 19,500 处 indicator 位移** | **0.095–0.105**（5/5 seed）← 旧文档的 "≤0.019、10× 稀释" 已作废 |
+| **Insects 官方 drift 位置** | **14,352 / 19,500 / 33,240 / 38,682 / 39,510**（Souza 2020 Table 2） |
+| Insects 经验 P(y) 变化点（旧用，非官方） | 12,672 / 14,256 / 17,952 / 46,728 / 52,008 |
+| Insects B1+ 四段（旧切法，只覆盖 2/5 官方点） | early [10000,15000) / mid [16000,21000) / late_pre [42500,47500) / late_post [47848,52848) |
+| TabPFN 探针在官方点 33,240 的掉幅 | pair_parity 100→83% ／ pair_A_vs_B 99→62% ／ 6 类 95→42%（**含类别重现效应，勿单独用于选任务**）|
+
+---
+
+## 6. 论文写作（阻塞于 §2–§3）
+
+- [ ] 有结论后，和用户 + 导师一起定论文骨架
+- [ ] 起草（中文正文 + 英文摘要）
+- [ ] 答辩 PPT 草稿 → 导师说要先看一版再正式答辩
+
+**已知写作约束**：目标是 pass，不是期刊 novelty；标题去 PFC 用 Multi-Timescale / Hierarchical；
+Ch2.3 保留半页 PFC 灵感但明确不声称生物建模；Phase 2 / 2.5 进附录；
+Phase 3 / 4 / 5 的负面结果保留但定位为方法演进的中间步骤；
+Limitations 必写：① 合成 rotating +1pp 未迁移到真实数据 ② Insects 标签只是 ID 分组、无官方物种/性别映射
+③ Phase 5 的段切法只覆盖 2/5 官方漂移 ④ 真实数据的多 seed 不是独立数据流。
+
+> ⚠️ [`phase5_plan.md`](phase5_plan.md) §7 的 10 章大纲已过时，不要直接用。
+
+---
+
+## 7. 明确不做的事
+
+| 不做 | 原因 |
+|---|---|
+| 加第三个真实数据集 | 导师认可现有两个（一渐进一突发）已够 |
+| 现在就做 6 类改造 | 决策 C：先用二值验证检测-动作链有没有增益，有了再投 45–60 工时 |
+| fit_threshold / init_strategy 等细粒度 ablation | 导师："治根不治本……应该是最后补充的实验，不应该是核心实验" |
+| 投稿版论文 / 期刊投稿 | 目标已降级为硕士答辩 pass |
+| 重跑 Phase 1–4 合成实验 | 数据已齐全且已 commit |
+| 新 detector 设计先在合成数据上验证 | 导师：直接在真实数据上验证 |
+| 改整体算法架构 | 导师：先确认方法可不可行，"如果完全不行，我觉得可以再看" |
+| 在 MacBook 上跑长实验 | MPS 比 CPU 还慢 5.6×；等 ROG |
+| `git add -A` / `git add .` | 会把导师私人录音转写推到**公开**仓库 |
+
+---
+
+## 8. 仓库卫生（延续项）
+
+- [x] 导师录音转写加进 `.gitignore`（2026-09-05）
+- [x] `.gitignore` 改动已提交（含 `advisor_demo_*.md`）
+- [x] `results/smoke/` 与 `results/smoke_oracle.png` 已 gitignore
+- [x] README 里 `run_phase4_a.py` 的 flag 修正 `--datasets` → `--dataset`
+- [ ] `phase5_plan.md` §7.1 / §8 已过时（已加 superseded 标注，确定新骨架后可整段重写）
+
+---
+
+## 9. 进度日志
+
+| 日期 | 步骤 | 结果 | commit |
+|---|---|---|---|
+| 2026-09-06 | Step 1 检测器 | river ADWIN 包装 + 零成本离线重放。**自写版 Insects 0/20 → river 16/20 运行报警、官方漂移 recall 1.00、中位延迟 266 步**；Electricity 仍 1/15。证实导师判断：是检测器把方法拦下来了。7 个新单测 | `bd07253` |
+| 2026-09-06 | Step 2 校准 | 加 `set_global_seed` 到四个脚本；Insects 坐标常量拆成官方 / 经验两组并注明；四份文档加更正 banner（γ 数字、9/15、2×2 缺格、seed 语义）。115 passed | `2ff0ad7` |
+| 2026-09-06 | 计划归位 | Phase 5.5 计划从对话搬进本文件，成为唯一活文档；Step 5 与 Step 3 顺序对调 | — |
