@@ -78,10 +78,16 @@ def compute_signals(X, y, context_size, stale_size, n_estimators, batch=256):
     }
 
 
-def score(alarms, drifts, tolerance):
+def score(alarms, drifts, tolerance, pre_tolerance=0):
+    """命中判定窗口 = [d - pre_tolerance, d + tolerance]。
+
+    允许**早于**标注点的报警算命中：Souza 的变点标的是温度**设定**的切换时刻，
+    传感器读数在切换前后若干步内就开始变，实测 d3_33240 上三种信号都在
+    标注点前 22–45 步报警。把它们记成误报会系统性低估检测器。
+    """
     hits, delays, used = 0, [], set()
     for d in drifts:
-        cand = [a for a in alarms if 0 <= a - d <= tolerance and a not in used]
+        cand = [a for a in alarms if -pre_tolerance <= a - d <= tolerance and a not in used]
         if cand:
             hits += 1
             used.add(cand[0])
@@ -103,7 +109,15 @@ def main():
                     help="诊断用 1 即可（只比信号形状，不比绝对准确率）")
     ap.add_argument("--delta", type=float, default=0.002)
     ap.add_argument("--cooldown", type=int, default=80)
-    ap.add_argument("--tolerance", type=int, default=600)
+    ap.add_argument("--tolerance", type=int, default=600,
+                    help="报警落在变点后多少步内算命中")
+    ap.add_argument("--pre_tolerance", type=int, default=100,
+                    help="报警早于变点多少步内仍算命中（标注点是温度设定切换时刻，"
+                         "传感器读数会提前变）")
+    ap.add_argument("--cache", type=str, default="results/contrast_signal_cache.npz",
+                    help="信号缓存；命中则跳过 TabPFN，改判据可零成本重算")
+    ap.add_argument("--recompute", action="store_true",
+                    help="忽略缓存，强制重算信号")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max_steps", type=int, default=None)
     ap.add_argument("--out", type=str, default="results/contrast_signal_diag.md")
@@ -128,15 +142,31 @@ def main():
         drifts = [d for d in ds.drift_points if d >= args.context_size]
         print(f"[{seg}] n={len(X)} drifts(local)={drifts} label_scheme={args.label_scheme}")
 
-        sig = compute_signals(X, y, args.context_size, args.stale_size, args.n_estimators)
-        ts, tl = sig["_timing"]
-        print(f"  stale(batched) {ts:.0f}s vs sliding(per-step) {tl:.0f}s")
+        ckey = f"{seg}|{args.label_scheme}|{args.context_size}|{args.stale_size}|" \
+               f"{args.n_estimators}|{args.max_steps}"
+        sig = None
+        if not args.recompute and os.path.exists(args.cache):
+            z = np.load(args.cache, allow_pickle=True)
+            if ckey in z.files:
+                sig = {k: v for k, v in z[ckey].item().items()}
+                print("  [cache] 命中，跳过 TabPFN")
+        if sig is None:
+            sig = compute_signals(X, y, args.context_size, args.stale_size,
+                                  args.n_estimators)
+            ts, tl = sig["_timing"]
+            print(f"  stale(batched) {ts:.0f}s vs sliding(per-step) {tl:.0f}s")
+            store = {}
+            if os.path.exists(args.cache):
+                z = np.load(args.cache, allow_pickle=True)
+                store = {k: z[k] for k in z.files}
+            store[ckey] = np.array(sig, dtype=object)
+            np.savez(args.cache, **store)
 
         for name in SIGNALS:
             det = make_detector("river", delta=args.delta, cooldown=args.cooldown)
             alarms = [int(sig["t"][i]) for i, v in enumerate(sig[name])
                       if det.update(float(v))]
-            sc = score(alarms, drifts, args.tolerance)
+            sc = score(alarms, drifts, args.tolerance, args.pre_tolerance)
             # 变点前后 ±200 步的均值差（与 γ 诊断同口径，便于直接对比）
             shifts = []
             for d in drifts:
@@ -186,7 +216,8 @@ def main():
         f"- label_scheme = `{args.label_scheme}`，context = {args.context_size}，"
         f"stale context = {args.stale_size}，n_estimators = {args.n_estimators}",
         f"- 检测器 = river ADWIN，δ = {args.delta}，cooldown = {args.cooldown}，"
-        f"命中容差 = 变点后 {args.tolerance} 步",
+        f"命中窗口 = 变点前 {args.pre_tolerance} 步 ~ 变点后 {args.tolerance} 步"
+        "（允许早报：标注点是温度**设定**的切换时刻，读数会提前变）",
         "- Insects 变点用 **Souza 2020 官方坐标**；`d0_control` 段无变点，那里的报警全是误报",
         "",
         "| segment | signal | alarms | recall | false alarms | median delay | max shift |",
