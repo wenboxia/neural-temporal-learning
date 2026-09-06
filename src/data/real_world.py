@@ -149,6 +149,54 @@ _INSECTS_ALIGNED_V2_BOUNDS = {
 }
 _INSECTS_ALIGNED_V2_SEGMENTS = list(_INSECTS_ALIGNED_V2_BOUNDS.keys())
 
+# ⚠️ 段有效性（2026-09-06 实测）：官方变点 14,352 正好落在一段 **1,754 条连续 class 5**
+# （[12,598, 14,352)）的末尾，所以任何包含它的窗口，漂移**之前**都是单一类别。
+# 那里的温度漂移 P(X|y) 与标签构成变化 P(y) 完全混淆，无法区分方法是在应对哪一个，
+# 且单类 context 会让 TabPFN 走常量 fallback（漂移前准确率恒为 100%）。
+# 同理 d2_19500 在 pair_A_vs_B 下丢行后漂移前也退化成单类。
+# 判定统一由 `_check_segment_validity()` 在加载时执行，不靠人记。
+_INSECTS_V2_KNOWN_DEGENERATE = {
+    ("d1_14352", "pair_parity"),
+    ("d1_14352", "pair_A_vs_B"),
+    ("d2_19500", "pair_A_vs_B"),
+}
+# 可用于漂移实验的段（两种 label_scheme 下都干净）
+_INSECTS_V2_USABLE_DRIFT_SEGMENTS = ["d3_33240", "d4_double"]
+
+
+def _check_segment_validity(
+    y: np.ndarray, drift_points: "List[int]", segment_id: str,
+    label_scheme: str, context_size: int = 200, allow_degenerate: bool = False,
+) -> None:
+    """漂移前后都必须有两个类别，否则这段测不出概念漂移。
+
+    单类的漂移前区间意味着：(a) TabPFN 走常量 fallback，漂移前准确率恒为 100%；
+    (b) 观察到的"漂移"其实是 P(y) 的构成变化，与温度引起的 P(X|y) 漂移无法区分。
+    这类段会安静地产出漂亮但无意义的数字，所以默认直接报错。
+    """
+    if not drift_points:
+        return
+    for dp in drift_points:
+        pre, post = y[context_size:dp], y[dp:]
+        bad = []
+        if len(pre) and len(np.unique(pre)) < 2:
+            bad.append(f"漂移前 {len(pre)} 行全是类别 {int(pre[0])}")
+        if len(post) and len(np.unique(post)) < 2:
+            bad.append(f"漂移后 {len(post)} 行全是类别 {int(post[0])}")
+        if bad:
+            msg = (
+                f"segment {segment_id!r} + label_scheme {label_scheme!r} 在漂移点 {dp} 处退化："
+                + "；".join(bad)
+                + "。这段的 P(y) 构成变化与温度漂移 P(X|y) 完全混淆，"
+                  "且单类 context 会让 TabPFN 走常量 fallback，测不出概念漂移。"
+                  f" 可用的漂移段：{_INSECTS_V2_USABLE_DRIFT_SEGMENTS}。"
+                  " 确知后果可传 allow_degenerate=True 绕过。"
+            )
+            if allow_degenerate:
+                print(f"[warn] {msg}")
+            else:
+                raise ValueError(msg)
+
 
 def _ensure_insects_csv(variant: str = "abrupt_balanced") -> str:
     if variant not in _INSECTS_GDRIVE:
@@ -203,6 +251,7 @@ def load_insects(
     insects_aligned: bool = False,
     aligned_v2: bool = False,
     label_scheme: str = "pair_parity",
+    allow_degenerate: bool = False,
 ) -> RealWorldDataset:
     """加载 Insects 二值化 segment。
 
@@ -294,6 +343,11 @@ def load_insects(
             f"segment {segment_id!r} 在 label_scheme={label_scheme!r} 下漂移点 "
             f"{local_drift} 距段首不足 200（context_size），漂移会落在 warm-up 里。"
         )
+
+    _check_segment_validity(
+        y_seg, local_drift, segment_id, label_scheme,
+        allow_degenerate=allow_degenerate,
+    )
 
     X_seg = _prequential_normalize(X_seg, fit_size=200)
 
@@ -403,7 +457,7 @@ def _prequential_normalize(X: np.ndarray, fit_size: int = 200) -> np.ndarray:
 def load_real_world(
     name: str, segment_id: str = "start", size: int = 5000,
     insects_aligned: bool = False, aligned_v2: bool = False,
-    label_scheme: str = "pair_parity", **kwargs,
+    label_scheme: str = "pair_parity", allow_degenerate: bool = False, **kwargs,
 ) -> RealWorldDataset:
     """
     name ∈ {"electricity", "insects"};
@@ -421,6 +475,6 @@ def load_real_world(
         return load_insects(
             segment_id=segment_id, size=size, variant=variant,
             insects_aligned=insects_aligned, aligned_v2=aligned_v2,
-            label_scheme=label_scheme,
+            label_scheme=label_scheme, allow_degenerate=allow_degenerate,
         )
     raise ValueError(f"unknown real-world dataset {name!r}")

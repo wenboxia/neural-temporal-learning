@@ -48,11 +48,19 @@ from src.drift.error_detector import (
     RiverADWINDetector,
     make_detector,
 )
+from src.regime.adapter_library import AdapterLibrary
 
 # Phase 5.5：报警后的动作分支（判别性对照的自变量）与触发源
 ACTIONS_ON_ALARM = ("route_adapter", "context_reset", "buffer_clear", "none")
 TRIGGER_SOURCES = ("detector", "oracle")
-from src.regime.adapter_library import AdapterLibrary
+
+# Phase 5.5：喂给检测器的信号。Step 4 诊断（results/contrast_signal_diag.md）实测：
+#   indicator     现状，官方漂移召回 1/2（漏 d3_33240）
+#   pred1         模型输出的类先验，召回 2/2，**不需要第二路预测**，d3 位移最大 0.340
+#   contrast_prob 导师路径 A，|p_stale − p_sliding|，召回 2/2，d2 位移 0.491（indicator 的 2×）
+#   contrast_hard 同上但取硬预测是否不一致
+# 四者在无漂移的 d0_control 段上都是零误报。
+DETECTOR_INPUTS = ("indicator", "pred1", "contrast_prob", "contrast_hard")
 
 
 class MultiTimescaleModel:
@@ -105,6 +113,7 @@ class MultiTimescaleModel:
         detector_cooldown: int = 80,
         detector_impl: str = "own",
         detector_clock: int = 1,
+        detector_input: str = "indicator",
         # ── Phase 5.5：报警动作策略（默认值 = Phase 4 A 既有行为）──
         action_on_alarm: "str | None" = None,
         trigger_source: str = "detector",
@@ -139,6 +148,10 @@ class MultiTimescaleModel:
             detector_impl:           "own"（默认，自写 Hoeffding 版 = Phase 4/5 既有行为）
                                      或 "river"（标准 ADWIN，经验方差界；Phase 5.5）
             detector_clock:          river ADWIN 每隔多少步检查一次（1 = 每步；仅 river 生效）
+            detector_input:          喂给检测器的信号，见 DETECTOR_INPUTS。
+                                     "indicator"（默认 = 既有行为）/ "pred1" /
+                                     "contrast_prob" / "contrast_hard"。
+                                     contrast_* 需先调 set_stale_proba() 注入 stale 路概率。
             action_on_alarm:         报警后执行什么动作（Phase 5.5 判别性对照的自变量）：
                                      "route_adapter"（默认 = Phase 4 A 行为：路由 + 巩固 active adapter）
                                      / "context_reset"（截断 TabPFN 的滑动 context，Day 0.5 oracle 那一招）
@@ -192,6 +205,13 @@ class MultiTimescaleModel:
                 )
             # 影子检测器必须独立于 oracle 动作，否则测不准检测延迟
             clear_detector_on_alarm = False
+        assert detector_input in DETECTOR_INPUTS, (
+            f"detector_input 必须 ∈ {DETECTOR_INPUTS}，收到: {detector_input!r}"
+        )
+        self.detector_input = detector_input
+        self.detector_signal_history: list = []
+        self._stale_proba = None          # contrast_* 用；由 set_stale_proba 注入
+        self._stale_offset = 0
         assert reset_size > 0, f"reset_size 必须 > 0，收到: {reset_size}"
         assert min_context_after_reset > 0, (
             f"min_context_after_reset 必须 > 0，收到: {min_context_after_reset}"
@@ -403,6 +423,20 @@ class MultiTimescaleModel:
         indicator = int(y_pred_hard != int(y_t))
         self.indicator_history.append(indicator)
 
+        # 检测器输入：indicator 之外的三种都不依赖真实标签，
+        # contrast_* 需要调用方预先传入 stale 路概率（见 set_stale_proba）。
+        if self.detector_input == "indicator":
+            detector_signal = float(indicator)
+        elif self.detector_input == "pred1":
+            detector_signal = float(y_pred_hard)
+        else:
+            p_stale = self._stale_proba_at(t)
+            if self.detector_input == "contrast_prob":
+                detector_signal = abs(p_stale - y_slow)
+            else:  # contrast_hard
+                detector_signal = float((p_stale >= 0.5) != (y_slow >= 0.5))
+        self.detector_signal_history.append(detector_signal)
+
         if self.detector is not None:
             # Option B: detector 输入 = 0/1 错误指示器。
             # raw error 流（mean≈0）和 |error| 流（mean≈0.30 across regimes）的 mean shift
@@ -413,7 +447,7 @@ class MultiTimescaleModel:
             # detector 始终运行；oracle 模式下它是**影子模式**（只记录 detector_events，
             # 不驱动动作、也不被 clear），这样同一个 run 里既有 oracle 动作效果，
             # 又有真实检测延迟可测。
-            detector_drift = self.detector.update(float(indicator))
+            detector_drift = self.detector.update(detector_signal)
             if detector_drift:
                 self.detector_events.append(t)
             if self.trigger_source == "detector" and detector_drift:
@@ -524,6 +558,34 @@ class MultiTimescaleModel:
     # ------------------------------------------------------------------
     # Phase 5.5：报警与动作
     # ------------------------------------------------------------------
+
+    def set_stale_proba(self, proba: np.ndarray, offset: int = 0) -> None:
+        """注入 stale 路（不适应）的正类概率，供 contrast_* 检测输入使用。
+
+        stale 路的 context 固定为该段最早若干样本，**在 t=0 就已全部可得**，
+        所以整段可以一次批量算完（实测 2–5 s，对比逐步滑窗的 304–801 s），
+        再按 t 查表。这不是偷看未来：用到的标签全在 offset 之前。
+
+        Args:
+            proba:  (n,) 正类概率，proba[i] 对应全局时刻 offset + i
+            offset: proba[0] 对应的全局 t
+        """
+        self._stale_proba = np.asarray(proba, dtype=np.float64)
+        self._stale_offset = int(offset)
+
+    def _stale_proba_at(self, t: int) -> float:
+        if self._stale_proba is None:
+            raise RuntimeError(
+                f"detector_input={self.detector_input!r} 需要 stale 路概率，"
+                "请先调用 set_stale_proba()"
+            )
+        i = t - self._stale_offset
+        if not (0 <= i < len(self._stale_proba)):
+            raise IndexError(
+                f"t={t} 超出 stale_proba 覆盖范围 "
+                f"[{self._stale_offset}, {self._stale_offset + len(self._stale_proba)})"
+            )
+        return float(self._stale_proba[i])
 
     def _register_alarm(self, t: int) -> None:
         """登记一次**驱动动作**的报警（区别于 detector_events：后者含影子模式的观测）。"""

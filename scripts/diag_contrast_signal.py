@@ -99,7 +99,9 @@ def score(alarms, drifts, tolerance, pre_tolerance=0):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--segments", type=str,
-                    default="d2_19500,d3_33240,d0_control")
+                    default="d3_33240,d4_double,d0_control",
+                    help="默认只用**有效**的漂移段 + 无漂移对照段；"
+                         "d1_14352 与 pair_A_vs_B 下的 d2_19500 漂移前是单类，已排除")
     ap.add_argument("--label_scheme", type=str, default="pair_A_vs_B",
                     choices=["pair_parity", "pair_A_vs_B"])
     ap.add_argument("--context_size", type=int, default=200)
@@ -135,7 +137,7 @@ def main():
 
     for seg in segments:
         ds = load_real_world("insects", segment_id=seg, aligned_v2=True,
-                             label_scheme=args.label_scheme)
+                             label_scheme=args.label_scheme)   # 退化段会在此报错
         X, y = ds.X, ds.y
         if args.max_steps is not None:
             X, y = X[: args.context_size + args.max_steps], y[: args.context_size + args.max_steps]
@@ -235,7 +237,8 @@ def main():
     for r in rows:
         drifts = [d for d in load_real_world(
             "insects", segment_id=r["segment"], aligned_v2=True,
-            label_scheme=args.label_scheme).drift_points if d >= args.context_size]
+            label_scheme=args.label_scheme).drift_points
+            if d >= args.context_size]
         lines.append(f"| {r['segment']} | `{r['signal']}` | {drifts} | "
                      f"{r['alarms']} | {r['delays']} |")
 

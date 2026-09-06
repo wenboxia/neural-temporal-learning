@@ -37,6 +37,7 @@ from src.data.temporal_loader import (
 )
 from src.models.multi_timescale import (
     ACTIONS_ON_ALARM,
+    DETECTOR_INPUTS,
     TRIGGER_SOURCES,
     MultiTimescaleModel,
 )
@@ -136,6 +137,13 @@ def parse_args():
                              "river=标准 ADWIN（经验方差界，Phase 5.5）")
     parser.add_argument("--detector_clock", type=int, default=1,
                         help="river ADWIN 每隔多少步检查一次（仅 --detector_impl river 生效）")
+    parser.add_argument("--detector_input", type=str, default="indicator",
+                        choices=list(DETECTOR_INPUTS),
+                        help="喂给检测器的信号：indicator（默认=既有行为）/ pred1（类先验，"
+                             "Step 4 诊断召回 2/2 且无需第二路预测）/ contrast_prob / contrast_hard"
+                             "（导师路径 A，需 stale 路，整段一次批量算完）")
+    parser.add_argument("--stale_size", type=int, default=200,
+                        help="contrast_* 的 stale 路固定 context 大小（取段首这么多样本）")
 
     # ── Phase 5.5：报警动作策略（判别性对照的自变量）────────────────────
     parser.add_argument("--action_on_alarm", type=str, default="route_adapter",
@@ -309,6 +317,7 @@ def main():
         detector_cooldown=args.detector_cooldown,
         detector_impl=args.detector_impl,
         detector_clock=args.detector_clock,
+        detector_input=args.detector_input,
         # ── Phase 5.5 ──
         action_on_alarm=args.action_on_alarm,
         trigger_source=args.trigger_source,
@@ -317,6 +326,29 @@ def main():
         min_context_after_reset=args.min_context_after_reset,
         consolidate_on_post_alarm_data=args.consolidate_on_post_alarm_data,
     )
+
+    # ── contrast_* 检测输入：整段 stale 路一次批量算完 ────────────────────
+    # stale context 固定为段首 stale_size 个样本，**在 t=0 就全部可得**，
+    # 所以批量预计算不构成未来信息泄漏。实测批量 2–5 s，逐步要 304–801 s。
+    if args.detector_input.startswith("contrast"):
+        import time as _time
+        _t0 = _time.time()
+        X_stale = dataset.X[: args.stale_size]
+        y_stale = dataset.y[: args.stale_size]
+        if len(np.unique(y_stale)) < 2:
+            raise SystemExit(
+                f"[error] stale context（段首 {args.stale_size} 个样本）只有单一类别，"
+                "TabPFN 会退化成常量预测，contrast 信号无意义。请增大 --stale_size。"
+            )
+        q_lo, q_hi = args.context_size, args.context_size + total_steps
+        p_stale = np.empty(q_hi - q_lo, dtype=np.float64)
+        for _s in range(q_lo, q_hi, 256):
+            _e = min(_s + 256, q_hi)
+            p_stale[_s - q_lo: _e - q_lo] = model.slow_prior.predict_proba(
+                X_stale, y_stale, dataset.X[_s:_e]
+            )[:, 1]
+        model.set_stale_proba(p_stale, offset=q_lo)
+        print(f"  stale 路预计算完成: {len(p_stale)} 步, {_time.time() - _t0:.0f}s")
 
     # ── Prequential 主循环 ──────────────────────────────────────────────
     predictions: list = []
@@ -485,6 +517,8 @@ def main():
             variant.append(f"{args.trigger_source}lag{args.oracle_lag}")
         if args.detector_impl != "own":
             variant.append(args.detector_impl)
+        if args.detector_input != "indicator":
+            variant.append(args.detector_input)
         if args.context_loader != "sliding":
             variant.append(
                 f"fr{args.fixed_ratio}" if args.context_loader == "composite" else "dual"
@@ -538,6 +572,8 @@ def main():
         action_t=np.array([a[0] for a in model.action_events], dtype=np.int64),
         n_context_truncations=np.array([model.n_context_truncations]),
         consolidate_on_post_alarm_data=np.array([int(args.consolidate_on_post_alarm_data)]),
+        detector_input=np.array([args.detector_input]),
+        detector_signal_history=np.array(model.detector_signal_history, dtype=np.float32),
         context_loader=np.array([args.context_loader]),
         fixed_ratio=np.array([args.fixed_ratio]),
         short_ratio=np.array([args.short_ratio]),

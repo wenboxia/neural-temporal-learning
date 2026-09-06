@@ -16,6 +16,8 @@ import pytest
 
 from src.data.real_world import (
     _INSECTS_ALIGNED_V2_BOUNDS,
+    _INSECTS_V2_KNOWN_DEGENERATE,
+    _INSECTS_V2_USABLE_DRIFT_SEGMENTS,
     _INSECTS_ALIGNED_V2_SEGMENTS,
     _INSECTS_EMPIRICAL_PY_SHIFT_POINTS,
     _INSECTS_LABEL_SCHEMES,
@@ -66,7 +68,7 @@ class TestDriftRemap:
     def test_pair_parity_keeps_raw_coordinates(self):
         for seg, (lo, hi) in _INSECTS_ALIGNED_V2_BOUNDS.items():
             d = load_insects(segment_id=seg, aligned_v2=True,
-                             label_scheme="pair_parity")
+                             label_scheme="pair_parity", allow_degenerate=True)
             expected = [x - lo for x in _INSECTS_OFFICIAL_DRIFT_POINTS if lo < x < hi]
             assert d.drift_points == expected, seg
             assert len(d.X) == hi - lo
@@ -77,7 +79,7 @@ class TestDriftRemap:
         lo, hi = _INSECTS_ALIGNED_V2_BOUNDS["d2_19500"]
         raw_local = 19500 - lo
         d = load_insects(segment_id="d2_19500", aligned_v2=True,
-                         label_scheme="pair_A_vs_B")
+                         label_scheme="pair_A_vs_B", allow_degenerate=True)
         assert len(d.drift_points) == 1
         assert d.drift_points[0] < raw_local, (
             "丢行后漂移坐标应左移；没左移说明重映射没生效"
@@ -92,7 +94,7 @@ class TestDriftRemap:
         raw = pd.read_csv(_CSV, header=None).iloc[lo:hi, 33].to_numpy()
         _, keep = _binarize_insects(raw, "pair_A_vs_B")
         d = load_insects(segment_id="d4_double", aligned_v2=True,
-                         label_scheme="pair_A_vs_B")
+                         label_scheme="pair_A_vs_B")   # 有效段，无需 allow_degenerate
         for abs_d, mapped in zip(
             [x for x in _INSECTS_OFFICIAL_DRIFT_POINTS if lo < x < hi],
             d.drift_points,
@@ -142,7 +144,40 @@ class TestAlignedV2Segments:
     def test_all_v2_segments_load_under_both_schemes(self):
         for seg in _INSECTS_ALIGNED_V2_SEGMENTS:
             for scheme in _INSECTS_LABEL_SCHEMES:
-                d = load_insects(segment_id=seg, aligned_v2=True, label_scheme=scheme)
+                d = load_insects(segment_id=seg, aligned_v2=True, label_scheme=scheme,
+                                 allow_degenerate=True)
                 assert len(d.X) == len(d.y) >= 1000
                 assert set(np.unique(d.y)) <= {0, 1}
                 assert scheme in d.name or scheme == "pair_parity"
+
+
+class TestSegmentValidity:
+    """漂移前后必须都有两类，否则测的是 P(y) 构成变化而不是概念漂移。"""
+
+    @needs_csv
+    def test_degenerate_segments_are_rejected_by_default(self):
+        for seg, scheme in _INSECTS_V2_KNOWN_DEGENERATE:
+            with pytest.raises(ValueError, match="退化"):
+                load_insects(segment_id=seg, aligned_v2=True, label_scheme=scheme)
+
+    @needs_csv
+    def test_usable_segments_load_cleanly(self):
+        for seg in _INSECTS_V2_USABLE_DRIFT_SEGMENTS:
+            for scheme in _INSECTS_LABEL_SCHEMES:
+                d = load_insects(segment_id=seg, aligned_v2=True, label_scheme=scheme)
+                for dp in d.drift_points:
+                    assert len(np.unique(d.y[200:dp])) == 2
+                    assert len(np.unique(d.y[dp:])) == 2
+
+    @needs_csv
+    def test_allow_degenerate_escape_hatch(self):
+        d = load_insects(segment_id="d1_14352", aligned_v2=True,
+                         label_scheme="pair_parity", allow_degenerate=True)
+        assert len(d.X) > 0
+
+    @needs_csv
+    def test_control_segment_needs_no_override(self):
+        """无漂移段没有漂移点可检查，不该被有效性守卫误伤。"""
+        d = load_insects(segment_id="d0_control", aligned_v2=True,
+                         label_scheme="pair_A_vs_B")
+        assert d.drift_points == []

@@ -204,3 +204,59 @@ class TestActionArms:
         assert set(ACTIONS_ON_ALARM) == {
             "route_adapter", "context_reset", "buffer_clear", "none"}
         assert set(TRIGGER_SOURCES) == {"detector", "oracle"}
+
+
+class TestDetectorInput:
+    """Phase 5.5：可切换的检测器输入（Step 4 诊断的落地）。"""
+
+    def test_default_is_indicator(self):
+        m = _mk(use_adapter_library=True)
+        assert m.detector_input == "indicator"
+
+    def test_unknown_input_rejected(self):
+        with pytest.raises(AssertionError):
+            _mk(use_adapter_library=True, detector_input="entropy")
+
+    def test_pred1_needs_no_stale_path(self):
+        """pred1 是模型自己的类先验，不需要第二路预测 —— 这正是它的优势。"""
+        m = _mk(use_adapter_library=True, detector_input="pred1")
+        _run(m, T=120, t0=100)
+        assert len(m.detector_signal_history) == 120
+        assert set(np.unique(m.detector_signal_history)) <= {0.0, 1.0}
+
+    def test_contrast_without_stale_proba_raises(self):
+        m = _mk(use_adapter_library=True, detector_input="contrast_prob")
+        with pytest.raises(RuntimeError, match="set_stale_proba"):
+            _run(m, T=5, t0=100)
+
+    def test_contrast_prob_uses_injected_stale_path(self):
+        m = _mk(use_adapter_library=True, detector_input="contrast_prob")
+        m.set_stale_proba(np.full(200, 0.2), offset=100)
+        _run(m, T=50, t0=100)
+        # stub 的 y_slow 恒为 0.9 → |0.2 − 0.9| = 0.7
+        assert np.allclose(m.detector_signal_history, 0.7, atol=1e-6)
+
+    def test_contrast_hard_is_binary_disagreement(self):
+        m = _mk(use_adapter_library=True, detector_input="contrast_hard")
+        m.set_stale_proba(np.full(200, 0.2), offset=100)   # 硬预测 0 vs slow 的 1
+        _run(m, T=50, t0=100)
+        assert np.allclose(m.detector_signal_history, 1.0)
+
+    def test_stale_proba_out_of_range_raises(self):
+        m = _mk(use_adapter_library=True, detector_input="contrast_prob")
+        m.set_stale_proba(np.full(10, 0.3), offset=100)
+        with pytest.raises(IndexError, match="超出 stale_proba"):
+            _run(m, T=50, t0=100)
+
+    def test_indicator_history_recorded_regardless_of_input(self):
+        """换检测输入不影响 indicator 的落盘，事后可重放比较。"""
+        for inp in ("indicator", "pred1"):
+            m = _mk(use_adapter_library=True, detector_input=inp)
+            _run(m, T=60, t0=100)
+            assert len(m.indicator_history) == 60
+            assert len(m.detector_signal_history) == 60
+
+    def test_all_inputs_declared(self):
+        from src.models.multi_timescale import DETECTOR_INPUTS
+        assert set(DETECTOR_INPUTS) == {
+            "indicator", "pred1", "contrast_prob", "contrast_hard"}
