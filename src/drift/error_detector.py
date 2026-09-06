@@ -180,3 +180,125 @@ class ADWINErrorDetector:
             f"t={self._t}, n_drifts={self._n_drifts}, "
             f"last_drift_t={self._last_drift_t})"
         )
+
+
+class RiverADWINDetector:
+    """
+    `river.drift.ADWIN` 的薄包装，对外接口与 ADWINErrorDetector 完全一致
+    （update / clear / __len__ / n_drifts / last_drift_t / t / current_mean）。
+
+    为什么需要它（Phase 5.5，2026-09-06）：
+      自写版用 value_range·Hoeffding 界，不用经验方差；默认配置
+      （max_window=400, min_subwindow=30, δ=0.002, value_range=1.0）下即使最有利的
+      200/200 切分也要求 |Δmean| ≥ 0.209。真实 Insects 的 0/1 indicator 流错误率仅
+      2–4%，官方变点 19500 处位移 ≈ 0.10，结构性不可能触发。
+      river 用经验方差的 Bernstein 型界，对低错误率流阈值低得多：在 35 条已存
+      indicator 流上离线重放，mid 段 5/5 seed 在 19500 后 ~187 步报警（clock=32）。
+
+    语义差异（写进论文 detector 消融段）：
+      - river 内部无 cooldown；本包装在 cooldown 期内**吞掉**报警（计入 n_suppressed），
+        而自写版在 cooldown 期内跳过检测但窗口继续累积。
+      - clear() 用 river 的 clone() 重建一个同参数的空检测器。
+    """
+
+    def __init__(
+        self,
+        delta: float = 0.002,
+        cooldown: int = 50,
+        clock: int = 1,
+        min_window_length: int = 5,
+        grace_period: int = 10,
+        max_buckets: int = 5,
+    ):
+        try:
+            from river import drift as _river_drift
+        except ImportError as e:  # pragma: no cover
+            raise ImportError("detector_impl='river' 需要 `pip install river`") from e
+        assert 0.0 < delta < 1.0, f"delta 必须 ∈ (0,1)，收到: {delta}"
+        assert cooldown >= 0, f"cooldown 必须 ≥ 0，收到: {cooldown}"
+        assert clock >= 1, f"clock 必须 ≥ 1，收到: {clock}"
+        self.delta = delta
+        self.cooldown = cooldown
+        self.clock = clock
+        self._adwin = _river_drift.ADWIN(
+            delta=delta,
+            clock=clock,
+            max_buckets=max_buckets,
+            min_window_length=min_window_length,
+            grace_period=grace_period,
+        )
+        self._t: int = 0
+        self._n_drifts: int = 0
+        self._n_suppressed: int = 0
+        self._last_drift_t: int = -10**9
+        self._cooldown_until: int = -1
+
+    def update(self, x: float) -> bool:
+        self._t += 1
+        self._adwin.update(float(x))
+        if not self._adwin.drift_detected:
+            return False
+        if self._t < self._cooldown_until:
+            self._n_suppressed += 1
+            return False
+        self._n_drifts += 1
+        self._last_drift_t = self._t
+        self._cooldown_until = self._t + self.cooldown
+        return True
+
+    def clear(self) -> None:
+        self._adwin = self._adwin.clone()
+        self._cooldown_until = self._t + self.cooldown
+
+    def __len__(self) -> int:
+        return int(self._adwin.width)
+
+    @property
+    def n_drifts(self) -> int:
+        return self._n_drifts
+
+    @property
+    def n_suppressed(self) -> int:
+        return self._n_suppressed
+
+    @property
+    def last_drift_t(self) -> int:
+        return self._last_drift_t
+
+    @property
+    def t(self) -> int:
+        return self._t
+
+    def current_mean(self) -> float:
+        return float(self._adwin.estimation) if len(self) else 0.0
+
+    def __repr__(self) -> str:
+        return (
+            f"RiverADWINDetector(delta={self.delta}, clock={self.clock}, "
+            f"window={len(self)}, t={self._t}, n_drifts={self._n_drifts}, "
+            f"n_suppressed={self._n_suppressed})"
+        )
+
+
+DETECTOR_IMPLS = ("own", "river")
+
+
+def make_detector(
+    impl: str = "own",
+    *,
+    delta: float = 0.002,
+    min_subwindow: int = 30,
+    max_window: int = 1000,
+    value_range: float = 1.0,
+    cooldown: int = 50,
+    clock: int = 1,
+):
+    """按 impl 构造检测器。'own' = 自写 Hoeffding 版（Phase 4/5 既有行为）；'river' = 标准 ADWIN。"""
+    if impl == "own":
+        return ADWINErrorDetector(
+            delta=delta, min_subwindow=min_subwindow, max_window=max_window,
+            value_range=value_range, cooldown=cooldown,
+        )
+    if impl == "river":
+        return RiverADWINDetector(delta=delta, cooldown=cooldown, clock=clock)
+    raise ValueError(f"detector_impl 必须 ∈ {DETECTOR_IMPLS}，收到: {impl!r}")

@@ -109,6 +109,12 @@ def parse_args():
                         help="ADWIN 切点两侧最小子窗")
     parser.add_argument("--detector_cooldown", type=int, default=80,
                         help="ADWIN 漂移声明后冷却步数")
+    parser.add_argument("--detector_impl", type=str, default="own",
+                        choices=["own", "river"],
+                        help="own=自写 Hoeffding 版（Phase 4/5 既有行为）；"
+                             "river=标准 ADWIN（经验方差界，Phase 5.5）")
+    parser.add_argument("--detector_clock", type=int, default=1,
+                        help="river ADWIN 每隔多少步检查一次（仅 --detector_impl river 生效）")
 
     return parser.parse_args()
 
@@ -129,7 +135,8 @@ def main():
     print(f"max_adapters: {args.max_adapters} | "
           f"library_fit_threshold: {args.library_fit_threshold} | "
           f"init_strategy: {args.library_init_strategy}")
-    print(f"detector_delta: {args.detector_delta} | "
+    print(f"detector_impl: {args.detector_impl} | clock: {args.detector_clock} | "
+          f"detector_delta: {args.detector_delta} | "
           f"min_subwindow: {args.detector_min_subwindow} | "
           f"cooldown: {args.detector_cooldown}")
     print(f"{'='*60}\n")
@@ -189,6 +196,8 @@ def main():
         detector_delta=args.detector_delta,
         detector_min_subwindow=args.detector_min_subwindow,
         detector_cooldown=args.detector_cooldown,
+        detector_impl=args.detector_impl,
+        detector_clock=args.detector_clock,
     )
 
     # ── Prequential 主循环 ──────────────────────────────────────────────
@@ -382,6 +391,8 @@ def main():
         n_random_inits=np.array([model.adapter_library.n_random_inits]),
         library_fit_threshold=np.array([args.library_fit_threshold]),
         library_init_strategy=np.array([args.library_init_strategy]),
+        detector_impl=np.array([args.detector_impl]),
+        detector_clock=np.array([args.detector_clock]),
     )
     print(f"数值结果已保存至: {npz_path}")
 

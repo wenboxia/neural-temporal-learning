@@ -43,7 +43,11 @@ from src.models.slow_prior import SlowPrior
 from src.models.fast_corrector import FastCorrector
 from src.models.gated_ensemble import GatedEnsemble
 from src.consolidation.fast_to_inter import FastToInterConsolidation
-from src.drift.error_detector import ADWINErrorDetector
+from src.drift.error_detector import (
+    ADWINErrorDetector,
+    RiverADWINDetector,
+    make_detector,
+)
 from src.regime.adapter_library import AdapterLibrary
 
 
@@ -95,6 +99,8 @@ class MultiTimescaleModel:
         detector_delta: float = 0.002,
         detector_min_subwindow: int = 30,
         detector_cooldown: int = 80,
+        detector_impl: str = "own",
+        detector_clock: int = 1,
     ):
         """
         Args:
@@ -118,6 +124,9 @@ class MultiTimescaleModel:
             detector_delta:          ADWIN 置信参数（越小越保守）
             detector_min_subwindow:  ADWIN 切点两侧最小子窗
             detector_cooldown:       ADWIN 漂移声明后冷却步数
+            detector_impl:           "own"（默认，自写 Hoeffding 版 = Phase 4/5 既有行为）
+                                     或 "river"（标准 ADWIN，经验方差界；Phase 5.5）
+            detector_clock:          river ADWIN 每隔多少步检查一次（1 = 每步；仅 river 生效）
         """
         assert input_dim > 0, f"input_dim 必须 > 0，收到: {input_dim}"
         assert device == "cpu", f"当前仅支持 CPU，收到: {device}"
@@ -170,7 +179,8 @@ class MultiTimescaleModel:
         #   self.gated_ensemble.adapter 被替换为 AdapterLibrary 实例（drop-in），
         #   self.adapter_optimizer 设为 None（consolidate 时改用 library.active_optimizer()），
         #   self.detector 为 ADWIN 实例，每步喂 raw error。
-        self.detector: ADWINErrorDetector | None = None
+        self.detector: ADWINErrorDetector | RiverADWINDetector | None = None
+        self.detector_impl = detector_impl
         self.adapter_library: AdapterLibrary | None = None
         if use_adapter_library:
             self.adapter_library = AdapterLibrary(
@@ -183,12 +193,17 @@ class MultiTimescaleModel:
                 init_strategy=library_init_strategy,
             )
             self.gated_ensemble.adapter = self.adapter_library  # drop-in
-            self.detector = ADWINErrorDetector(
+            # Phase 5.5：detector_impl="river" 换标准 ADWIN（经验方差界）。
+            # own 版的 max_window=buffer_size*4=400 + value_range=1.0 使 200/200 切分
+            # 也要求 |Δmean| ≥ 0.209，真实 Insects indicator 位移 ~0.10 结构性触发不了。
+            self.detector = make_detector(
+                detector_impl,
                 delta=detector_delta,
                 min_subwindow=detector_min_subwindow,
                 max_window=max(2 * detector_min_subwindow, buffer_size * 4),
-                value_range=1.0,        # |error| ∈ [0, 1] (option A: abs signal)
+                value_range=1.0,        # |error| / indicator ∈ [0, 1]
                 cooldown=detector_cooldown,
+                clock=detector_clock,
             )
             self.adapter_optimizer = None
         else:

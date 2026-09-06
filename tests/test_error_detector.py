@@ -18,7 +18,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pytest
 
-from src.drift.error_detector import ADWINErrorDetector
+from src.drift.error_detector import (
+    ADWINErrorDetector,
+    DETECTOR_IMPLS,
+    RiverADWINDetector,
+    make_detector,
+)
 
 
 class TestADWINErrorDetector:
@@ -123,3 +128,78 @@ class TestADWINErrorDetector:
         assert det.n_drifts >= 2, (
             f"两次漂移应至少检测 2 次，实际 {det.n_drifts}"
         )
+
+
+class TestRiverADWINDetector:
+    """Phase 5.5：river 标准 ADWIN 包装（经验方差界）。
+
+    存在理由：自写版对低错误率的 0/1 indicator 流结构性不触发
+    （200/200 切分要求 |Δmean| ≥ 0.209，真实 Insects 位移 ~0.10）。
+    """
+
+    def _step_stream(self, det, n=4000, p_lo=0.05, p_hi=0.15, shift=2000, seed=0):
+        rng = np.random.default_rng(seed)
+        alarms = []
+        for t in range(n):
+            p = p_lo if t < shift else p_hi
+            if det.update(float(rng.random() < p)):
+                alarms.append(t)
+        return alarms
+
+    def test_fires_on_low_rate_indicator_step(self):
+        """0.05 → 0.15 的错误率阶跃应被检测到，延迟 ≤ 400 步。"""
+        det = make_detector("river", cooldown=80)
+        alarms = self._step_stream(det)
+        assert alarms, "river ADWIN 应在低错误率阶跃上触发"
+        delay = alarms[0] - 2000
+        assert 0 <= delay <= 400, f"首次检测延迟应 ∈ [0, 400]，实际 {delay}"
+
+    def test_own_detector_silent_on_same_signal(self):
+        """同一信号上自写版沉默 —— 这就是 Phase 4/5 真实数据 0 触发的实现层根因。"""
+        det = make_detector(
+            "own", min_subwindow=30, max_window=400, value_range=1.0, cooldown=80,
+        )
+        assert self._step_stream(det) == []
+
+    def test_no_false_alarm_on_iid_stream(self):
+        """恒定 5% 错误率的 i.i.d. 流不应触发。"""
+        det = make_detector("river", cooldown=80)
+        rng = np.random.default_rng(1)
+        alarms = [t for t in range(4000) if det.update(float(rng.random() < 0.05))]
+        assert alarms == [], f"i.i.d. 流不应误报，实际 {alarms}"
+
+    def test_cooldown_suppresses_and_counts(self):
+        """cooldown 期内的报警被吞掉并计入 n_suppressed，相邻报警间隔 ≥ cooldown。"""
+        det = make_detector("river", cooldown=500)
+        alarms = self._step_stream(det, p_lo=0.02, p_hi=0.30, shift=1000, seed=2)
+        assert alarms
+        for a, b in zip(alarms[:-1], alarms[1:]):
+            assert b - a >= 500, f"相邻报警间隔 {b-a} < cooldown=500"
+        assert det.n_suppressed >= 0
+
+    def test_clear_resets_window(self):
+        det = make_detector("river", cooldown=10)
+        rng = np.random.default_rng(3)
+        for _ in range(200):
+            det.update(float(rng.random() < 0.1))
+        assert len(det) > 0
+        det.clear()
+        assert len(det) == 0
+
+    def test_factory_rejects_unknown_impl(self):
+        with pytest.raises(ValueError):
+            make_detector("bogus")
+
+    def test_interface_parity_with_own(self):
+        """两种实现对外属性一致，可互换注入 MultiTimescaleModel。"""
+        for impl in DETECTOR_IMPLS:
+            det = make_detector(impl)
+            for _ in range(50):
+                det.update(0.0)
+            assert isinstance(det.update(1.0), bool)
+            assert isinstance(len(det), int)
+            assert isinstance(det.n_drifts, int)
+            assert isinstance(det.last_drift_t, int)
+            assert isinstance(det.t, int)
+            assert isinstance(det.current_mean(), float)
+            det.clear()
